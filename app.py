@@ -174,7 +174,7 @@ def refine_image():
 
         char_key = body.get("character", "")
         camera = body.get("camera", "moody")
-        denoise = float(body.get("denoise", 0.5))
+        denoise = float(body.get("denoise", 0.45))
         scene = body.get("scene_prompt", "")
         seed = body.get("seed")
         if seed is None or seed == "" or seed == -1:
@@ -237,6 +237,8 @@ def refine_image():
             "denoise": denoise,
             "character": char_key
         })
+    except (ConnectionRefusedError, urllib.error.URLError) as e:
+        return jsonify({"error": "ComfyUI 未启动，请先运行 ComfyUI (端口 8188)"}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

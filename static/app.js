@@ -276,7 +276,7 @@
                     filename: currentFilename,
                     character: character,
                     camera: cameraOverride || refineModel,
-                    denoise: 0.7,
+                    denoise: 0.45,
                     scene_prompt: $prompt.value.trim(),
                     seed: -1
                 })
