@@ -1,10 +1,10 @@
-:root { --bg: #0f0e17; --text: #e0e0e0; }
-body { background: var(--bg); color: var(--text); }
-# build-tag: v3
-# build-tag: v7
-# build-tag: v11
-# build-tag: v15
-# build-tag: v19
-# build-tag: v23
-# build-tag: v27
-# build-tag: v31
+:root {
+    --bg: #0f0e17;
+    --surface: #1a1a2e;
+    --text: #e0e0e0;
+}
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+}
