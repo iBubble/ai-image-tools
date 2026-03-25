@@ -2,9 +2,150 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>Image Studio</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Studio — AI 图片工作台</title>
+    <link rel="stylesheet" href="/static/style.css?v=6">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <h1>Image Studio</h1>
+    <header>
+        <div class="logo">🎨 Image Studio</div>
+        <div class="subtitle">ComfyUI + Pollinations 双引擎</div>
+    </header>
+
+    <main>
+        <!-- 左侧控制面板 -->
+        <section class="panel control-panel">
+            <h2>生成配置</h2>
+
+            <!-- 后端选择 -->
+            <div class="field">
+                <label>生成引擎</label>
+                <div class="btn-group" id="engine-group">
+                    <button class="btn-option active" data-value="pollinations">
+                        ⚡ Pollinations <span class="tag">快速</span>
+                    </button>
+                    <button class="btn-option" data-value="comfyui">
+                        🖥️ ComfyUI <span class="tag">高质量</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 模型选择 -->
+            <div class="field">
+                <label>模型</label>
+                <div class="btn-group" id="model-group">
+                    <button class="btn-option active" data-value="zimage">ZImage</button>
+                    <button class="btn-option" data-value="flux">Flux</button>
+                </div>
+            </div>
+
+            <!-- 人物快速选择 -->
+            <div class="field" id="character-field">
+                <label>人物预设 (自动注入基础 Prompt)</label>
+                <div class="btn-group" id="character-group">
+                    <button class="btn-option active" data-value="">无</button>
+                </div>
+            </div>
+
+            <!-- Prompt -->
+            <div class="field">
+                <label>场景/动作提示词 (Positive Prompt)</label>
+                <textarea id="prompt" rows="5"
+                    placeholder="输入场景描述，人物基础 prompt 会自动注入..."></textarea>
+            </div>
+
+            <!-- Negative Prompt -->
+            <details class="advanced" open>
+                <summary>⚙️ 高级选项</summary>
+                <div class="field">
+                    <label>反向提示词 (Negative Prompt)</label>
+                    <textarea id="negative" rows="3"
+                        placeholder="ugly, deformed, bad anatomy..."></textarea>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Seed</label>
+                        <input type="number" id="seed" placeholder="随机" value="">
+                    </div>
+                    <div class="field">
+                        <label>尺寸</label>
+                        <select id="size">
+                            <option value="1080x1920" selected>1080×1920 (竖版HD)</option>
+                            <option value="1920x1080">1920×1080 (横版HD)</option>
+                            <option value="1024x1024">1024×1024</option>
+                            <option value="832x1216">832×1216</option>
+                            <option value="1216x832">1216×832</option>
+                            <option value="768x1344">768×1344</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="safe-mode"> 安全模式 (NSFW 过滤)
+                    </label>
+                </div>
+                <div class="field">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="use-api-key" checked> 使用 API Key (更快更稳定)
+                    </label>
+                </div>
+                <div class="field">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enhance-mode" checked> 🔮 AI 增强画质 (enhance)
+                    </label>
+                </div>
+            </details>
+
+            <!-- 生成按钮 -->
+            <button id="generate-btn" class="btn-generate">
+                <span class="btn-text">✨ 生成图片</span>
+                <span class="btn-loading" style="display:none">
+                    <span class="spinner"></span> 生成中...
+                </span>
+            </button>
+
+            <div id="status" class="status" style="display:none"></div>
+        </section>
+
+        <!-- 右侧图片展示 -->
+        <section class="panel output-panel">
+            <div class="image-container" id="image-container">
+                <div class="placeholder" id="placeholder">
+                    <div class="placeholder-icon">🖼️</div>
+                    <p>生成的图片将显示在这里</p>
+                    <p class="hint">Pollinations ⚡ 3~6秒 | ComfyUI 🖥️ ~100秒</p>
+                </div>
+                <img id="result-image" style="display:none" alt="生成结果">
+            </div>
+            <div class="push-actions" id="push-actions">
+                <button class="btn-push btn-feishu" id="push-feishu" onclick="pushToFeishu()" disabled>
+                    📨 推送飞书
+                </button>
+                <button class="btn-push btn-lab" id="push-lab" onclick="pushToLab()" disabled>
+                    🧪 推送实验室
+                </button>
+                <button class="btn-push btn-refine" id="refine-btn" onclick="refineImage()" disabled>
+                    🔄 精修
+                </button>
+                <label class="btn-push btn-upload" for="upload-file">
+                    ⬆️ 上传
+                </label>
+                <input type="file" id="upload-file" accept="image/*"
+                       style="display:none" onchange="uploadImage(this)">
+                <div class="refine-model-group">
+                    <span class="refine-label">精修模型:</span>
+                    <button class="btn-option btn-sm active" data-value="moody" id="rm-moody" onclick="setRefineModel('moody')">Moody</button>
+                    <button class="btn-option btn-sm" data-value="pornmaster" id="rm-porn" onclick="setRefineModel('pornmaster')">Pornmaster</button>
+                </div>
+            </div>
+            <div class="history" id="history">
+                <h3>历史记录</h3>
+                <div class="history-grid" id="history-grid"></div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/app.js?v=9"></script>
 </body>
 </html>
