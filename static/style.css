@@ -48,12 +48,19 @@ main {
 }
 
 .control-panel { flex: 0 0 420px; overflow-y: auto; max-height: calc(100vh - 120px); }
-.output-panel { flex: 1; display: flex; flex-direction: column; }
+.output-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 
 h2 { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
 
-.field { margin-bottom: 16px; }
-.field label { display: block; font-size: 13px; font-weight: 500; color: var(--text-dim); margin-bottom: 6px; }
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 13px; font-weight: 500; color: var(--text-dim); margin-bottom: 4px; }
+
+.checkbox-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 8px;
+}
 
 textarea, input[type="number"], select {
     width: 100%;

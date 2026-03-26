@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image Studio — AI 图片工作台</title>
-    <link rel="stylesheet" href="/static/style.css?v=7">
+    <link rel="stylesheet" href="/static/style.css?v=8">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -18,34 +18,30 @@
         <section class="panel control-panel">
             <h2>生成配置</h2>
 
-            <!-- 后端选择 -->
-            <div class="field">
-                <label>生成引擎</label>
-                <div class="btn-group" id="engine-group">
-                    <button class="btn-option active" data-value="pollinations">
-                        ⚡ Pollinations <span class="tag">快速</span>
-                    </button>
-                    <button class="btn-option" data-value="comfyui">
-                        🖥️ ComfyUI <span class="tag">高质量</span>
-                    </button>
+            <!-- 引擎 + 模型 同行 -->
+            <div class="field-row">
+                <div class="field">
+                    <label>引擎</label>
+                    <div class="btn-group" id="engine-group">
+                        <button class="btn-option active" data-value="pollinations">⚡ Poll</button>
+                        <button class="btn-option" data-value="comfyui">🖥️ Comfy</button>
+                    </div>
                 </div>
-                <div id="quota-display" style="font-size: 12px; color: #a0a0a0; margin-top: 8px;">
-                    ⚡ Pollinations 剩余额度: 检查中...
-                </div>
-            </div>
-
-            <!-- 模型选择 -->
-            <div class="field">
-                <label>模型</label>
-                <div class="btn-group" id="model-group">
-                    <button class="btn-option active" data-value="zimage">ZImage</button>
-                    <button class="btn-option" data-value="flux">Flux</button>
+                <div class="field">
+                    <label>模型</label>
+                    <div class="btn-group" id="model-group">
+                        <button class="btn-option active" data-value="zimage">ZImage</button>
+                        <button class="btn-option" data-value="flux">Flux</button>
+                    </div>
                 </div>
             </div>
+            <div id="quota-display" style="font-size:11px;color:#a0a0a0;margin:-8px 0 8px;">
+                ⚡ 额度: 检查中...
+            </div>
 
-            <!-- 人物快速选择 -->
+            <!-- 人物预设 -->
             <div class="field" id="character-field">
-                <label>人物预设 (自动注入基础 Prompt)</label>
+                <label>人物预设</label>
                 <div class="btn-group" id="character-group">
                     <button class="btn-option active" data-value="">无</button>
                 </div>
@@ -53,17 +49,17 @@
 
             <!-- Prompt -->
             <div class="field">
-                <label>场景/动作提示词 (Positive Prompt)</label>
-                <textarea id="prompt" rows="5"
-                    placeholder="输入场景描述，人物基础 prompt 会自动注入..."></textarea>
+                <label>场景提示词</label>
+                <textarea id="prompt" rows="3"
+                    placeholder="输入场景描述，人物 prompt 自动注入..."></textarea>
             </div>
 
-            <!-- Negative Prompt -->
+            <!-- 高级选项（默认折叠） -->
             <details class="advanced" open>
                 <summary>⚙️ 高级选项</summary>
                 <div class="field">
-                    <label>反向提示词 (Negative Prompt)</label>
-                    <textarea id="negative" rows="3"
+                    <label>反向提示词</label>
+                    <textarea id="negative" rows="2"
                         placeholder="ugly, deformed, bad anatomy..."></textarea>
                 </div>
                 <div class="field-row">
@@ -74,8 +70,8 @@
                     <div class="field">
                         <label>尺寸</label>
                         <select id="size">
-                            <option value="1080x1920" selected>1080×1920 (竖版HD)</option>
-                            <option value="1920x1080">1920×1080 (横版HD)</option>
+                            <option value="1080x1920" selected>1080×1920</option>
+                            <option value="1920x1080">1920×1080</option>
                             <option value="1024x1024">1024×1024</option>
                             <option value="832x1216">832×1216</option>
                             <option value="1216x832">1216×832</option>
@@ -83,25 +79,11 @@
                         </select>
                     </div>
                 </div>
-                <div class="field">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="safe-mode"> 安全模式 (NSFW 过滤)
-                    </label>
-                </div>
-                <div class="field">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="use-api-key" checked> 使用 API Key (更快更稳定)
-                    </label>
-                </div>
-                <div class="field">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="enhance-mode" checked> 🔮 AI 增强画质 (enhance)
-                    </label>
-                </div>
-                <div class="field">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="auto-refine"> 🔄 生成后自动精修 (ComfyUI)
-                    </label>
+                <div class="checkbox-grid">
+                    <label class="checkbox-label"><input type="checkbox" id="safe-mode"> 🔒 安全模式</label>
+                    <label class="checkbox-label"><input type="checkbox" id="use-api-key" checked> 🔑 API Key</label>
+                    <label class="checkbox-label"><input type="checkbox" id="enhance-mode" checked> 🔮 增强画质</label>
+                    <label class="checkbox-label"><input type="checkbox" id="auto-refine"> 🔄 自动精修</label>
                 </div>
             </details>
 
@@ -161,6 +143,6 @@
         </section>
     </main>
 
-    <script src="/static/app.js?v=15"></script>
+    <script src="/static/app.js?v=16"></script>
 </body>
 </html>

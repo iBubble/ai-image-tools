@@ -142,7 +142,7 @@
         // 去重
         history = history.filter(u => u !== url);
         history.unshift(url);
-        if (history.length > 10) history = history.slice(0, 10);
+        if (history.length > 20) history = history.slice(0, 20);
         // 持久化到 localStorage
         try { localStorage.setItem('imgStudioHistory', JSON.stringify(history)); } catch(e) {}
         renderHistory();
