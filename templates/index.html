@@ -29,6 +29,9 @@
                         🖥️ ComfyUI <span class="tag">高质量</span>
                     </button>
                 </div>
+                <div id="quota-display" style="font-size: 12px; color: #a0a0a0; margin-top: 8px;">
+                    ⚡ Pollinations 剩余额度: 检查中...
+                </div>
             </div>
 
             <!-- 模型选择 -->
@@ -95,6 +98,11 @@
                         <input type="checkbox" id="enhance-mode" checked> 🔮 AI 增强画质 (enhance)
                     </label>
                 </div>
+                <div class="field">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="auto-refine"> 🔄 生成后自动精修 (ComfyUI)
+                    </label>
+                </div>
             </details>
 
             <!-- 生成按钮 -->
@@ -117,6 +125,7 @@
                     <p class="hint">Pollinations ⚡ 3~6秒 | ComfyUI 🖥️ ~100秒</p>
                 </div>
                 <img id="result-image" style="display:none" alt="生成结果">
+                <div id="image-meta" style="display:none; position:absolute; bottom:10px; left:10px; background:rgba(0,0,0,0.6); color:#fff; padding:5px 10px; border-radius:4px; font-size:0.85em; z-index:10; backdrop-filter:blur(4px);"></div>
             </div>
             <div class="push-actions" id="push-actions">
                 <button class="btn-push btn-feishu" id="push-feishu" onclick="pushToFeishu()" disabled>
@@ -125,6 +134,9 @@
                 <button class="btn-push btn-lab" id="push-lab" onclick="pushToLab()" disabled>
                     🧪 推送实验室
                 </button>
+                <label class="btn-push" style="cursor:pointer; font-size:0.85em; display:inline-flex; align-items:center; gap:4px; padding:6px 10px;">
+                    <input type="checkbox" id="cartoon-mode"> 🎨 卡通
+                </label>
                 <button class="btn-push btn-refine" id="refine-btn" onclick="refineImage()" disabled>
                     🔄 精修
                 </button>
@@ -146,6 +158,6 @@
         </section>
     </main>
 
-    <script src="/static/app.js?v=9"></script>
+    <script src="/static/app.js?v=14"></script>
 </body>
 </html>

@@ -66,6 +66,90 @@ def detect_character(text):
     return None
 
 
+# ── 自动检测卡通/真人 ──
+def _detect_cartoon(filepath):
+    """分析像素判断图片是卡通(True)还是真人照(False)"""
+    try:
+        from PIL import Image
+        import numpy as np
+        img = Image.open(filepath).convert("RGB").resize((128, 128))
+        arr = np.array(img, dtype=np.float32)
+        # 颜色唯一性（量化到8位色）
+        q = (arr / 32).astype(np.uint8).reshape(-1, 3)
+        uc = len(set(map(tuple, q.tolist())))
+        # 边缘锐度
+        gray = np.mean(arr, axis=2)
+        em = (np.mean(np.abs(np.diff(gray, axis=1)))
+              + np.mean(np.abs(np.diff(gray, axis=0)))) / 2
+        # 饱和度
+        mx, mn = arr.max(axis=2), arr.min(axis=2)
+        sat = np.mean(np.where(mx > 0, (mx - mn) / (mx + 1e-6), 0))
+        sc = (2 if uc < 600 else 1 if uc < 900 else 0)
+        sc += (1 if em > 18 else 0) + (1 if sat > 0.35 else 0)
+        return sc >= 2
+    except Exception:
+        return False  # 检测失败默认当真人
+
+
+# ── 自动归档 + 推送（后台线程，不阻塞请求） ──
+SECRET_DIR = os.path.join(PROJECT_ROOT, "AIGC", "outputs")
+os.makedirs(SECRET_DIR, exist_ok=True)
+
+def _auto_archive(filepath):
+    """后台线程：保存到 .secret + 推送飞书 + SCP 到服务器B"""
+    import threading
+    def _worker():
+        import subprocess
+        from datetime import datetime
+        try:
+            date_str = datetime.now().strftime("%Y%m%d")
+            dest_dir = os.path.join(SECRET_DIR, date_str)
+            os.makedirs(dest_dir, exist_ok=True)
+            fname = os.path.basename(filepath)
+            dest = os.path.join(dest_dir, fname)
+            os.system(f"cp '{filepath}' '{dest}'")
+            print(f"[Archive] 已保存: {dest}")
+
+            # 推送飞书
+            try:
+                from src.utils.feishu_notifier import FeishuNotifier
+                notifier = FeishuNotifier()
+                open_id = "ou_c456044cf7eb9ccbf478f7c2d47bf74c"
+                image_key = notifier.upload_image(filepath)
+                if image_key:
+                    card = {
+                        "config": {"wide_screen_mode": True},
+                        "header": {"template": "blue",
+                                   "title": {"content": "🎨 Image Studio",
+                                             "tag": "plain_text"}},
+                        "elements": [
+                            {"tag": "img", "img_key": image_key,
+                             "alt": {"content": fname,
+                                     "tag": "plain_text"}},
+                        ]
+                    }
+                    notifier.send_interactive_card(open_id, card)
+                    print(f"[Archive] 飞书推送成功")
+            except Exception as e:
+                print(f"[Archive] 飞书推送失败: {e}")
+
+            # SCP 到服务器B
+            try:
+                target = f"/root/b-lab_20260319203311/upload/{date_str}"
+                subprocess.run(
+                    ["ssh", "tencent-server", f"mkdir -p {target}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, timeout=10)
+                subprocess.run(
+                    ["scp", filepath, f"tencent-server:{target}/"],
+                    capture_output=True, timeout=30)
+                print(f"[Archive] 服务器B推送成功")
+            except Exception as e:
+                print(f"[Archive] 服务器B推送失败: {e}")
+        except Exception as e:
+            print(f"[Archive] 归档失败: {e}")
+    threading.Thread(target=_worker, daemon=True).start()
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -148,6 +232,7 @@ def comfyui_generate():
         src = os.path.join(COMFYUI_OUTPUT, img_name)
         dst = os.path.join(OUTPUT_DIR, f"{prefix}.png")
         os.system(f"cp '{src}' '{dst}'")
+        _auto_archive(dst)
 
         return jsonify({
             "url": f"/api/image/{prefix}.png",
@@ -174,8 +259,19 @@ def refine_image():
 
         char_key = body.get("character", "")
         camera = body.get("camera", "moody")
-        denoise = float(body.get("denoise", 0.45))
+        denoise_input = body.get("denoise", "auto")
         scene = body.get("scene_prompt", "")
+
+        # 自动检测卡通/真人
+        is_cartoon_img = False
+        if denoise_input == "auto" or denoise_input is None:
+            is_cartoon_img = _detect_cartoon(fpath)
+            denoise = 0.65 if is_cartoon_img else 0.55
+            print(f"[Refine] 自动检测: "
+                  f"{'卡通' if is_cartoon_img else '真人'} → "
+                  f"denoise={denoise}")
+        else:
+            denoise = float(denoise_input)
         seed = body.get("seed")
         if seed is None or seed == "" or seed == -1:
             seed = random.randint(1, 10**12)
@@ -230,12 +326,14 @@ def refine_image():
         src = os.path.join(COMFYUI_OUTPUT, img_name)
         dst = os.path.join(OUTPUT_DIR, f"{prefix}.png")
         os.system(f"cp '{src}' '{dst}'")
+        _auto_archive(dst)
 
         return jsonify({
             "url": f"/api/image/{prefix}.png",
             "seed": seed, "model": camera,
             "denoise": denoise,
-            "character": char_key
+            "character": char_key,
+            "img_type": "cartoon" if is_cartoon_img else "photo"
         })
     except (ConnectionRefusedError, urllib.error.URLError) as e:
         return jsonify({"error": "ComfyUI 未启动，请先运行 ComfyUI (端口 8188)"}), 503
@@ -267,13 +365,41 @@ def upload_image():
     return jsonify({"ok": True, "filename": fname,
                     "url": f"/api/image/{fname}"})
 
+@app.route("/api/pollinations/quota", methods=["GET"])
+def pollinations_quota():
+    """获取 Pollinations 全部 key 的余额总和"""
+    total = 0.0
+    for key in POLLINATIONS_KEYS:
+        try:
+            req = urllib.request.Request("https://gen.pollinations.ai/account/balance")
+            req.add_header("Authorization", f"Bearer {key}")
+            req.add_header("User-Agent", "Mozilla/5.0")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read())
+                total += float(data.get("balance", 0))
+        except Exception:
+            pass
+    
+    return jsonify({
+        "balance": total,
+        "images_left": int(total / 0.001)
+    })
+
 
 @app.route("/api/pollinations/generate", methods=["POST"])
 def pollinations_generate():
     """后端代理 Pollinations API（绕过 CORS）"""
     try:
+        from TakePhotos.prompts.slave_prompt_library import CHAR_TRAITS_DB
         body = request.json
         prompt = body.get("prompt", "")
+        char_key = body.get("character", "")
+        
+        # 核心漏洞修复：如果用户在界面选中了人物，必须强制将人物特征前置注入 Poll 提示词
+        # 否则 Poll 会完全依据用户写的 prompt 画，导致短发变长发等丢失特征问题
+        if char_key and char_key in CHAR_TRAITS_DB:
+            prompt = f"({CHAR_TRAITS_DB[char_key]}:1.3), {prompt}"
+
         # 自动追加写实增强词（摄影级）
         realism_suffix = (", photorealistic, RAW photo, DSLR, "
                           "professional photography, natural lighting, "
@@ -313,18 +439,25 @@ def pollinations_generate():
         headers = {"User-Agent": "ImageStudio/1.0"}
         use_key = body.get("use_key", False)
 
-        # 带 key 轮换 + 网络重试的请求逻辑
+        # 带 key 轮换 + 网络重试 + 402 自动降级的请求逻辑
         import ssl
         global _current_key_idx
-        max_key_tries = len(POLLINATIONS_KEYS) if use_key else 1
         max_net_retries = 3
         last_err = None
         data = None
         ct = "image/jpeg"
-        for key_attempt in range(max_key_tries):
+        
+        # 构建尝试顺序：所有 Key → 无 Key 兜底
+        key_list = []
+        if use_key and POLLINATIONS_KEYS:
+            for i in range(len(POLLINATIONS_KEYS)):
+                idx = (_current_key_idx + i) % len(POLLINATIONS_KEYS)
+                key_list.append(POLLINATIONS_KEYS[idx])
+        key_list.append(None)  # 最后一轮：无 Key 免费模式兜底
+        
+        for ki, key in enumerate(key_list):
             req_headers = dict(headers)
-            if use_key and POLLINATIONS_KEYS:
-                key = POLLINATIONS_KEYS[_current_key_idx % len(POLLINATIONS_KEYS)]
+            if key:
                 req_headers["Authorization"] = f"Bearer {key}"
             for retry in range(max_net_retries):
                 try:
@@ -333,22 +466,27 @@ def pollinations_generate():
                         data = resp.read()
                         ct = resp.headers.get("Content-Type", "image/jpeg")
                     break
-                except (ssl.SSLError, ConnectionResetError, urllib.error.URLError) as e:
+                except (ssl.SSLError, ConnectionResetError,
+                        urllib.error.URLError) as e:
                     last_err = e
-                    print(f"[Pollinations] 网络错误(retry {retry+1}/{max_net_retries}): {e}")
+                    print(f"[Poll] 网络错误(retry {retry+1}): {e}")
                     time.sleep(2)
                     continue
                 except urllib.error.HTTPError as e:
                     last_err = e
-                    if e.code in (429, 402, 403) and use_key:
-                        _current_key_idx = (_current_key_idx + 1) % len(POLLINATIONS_KEYS)
-                        print(f"[Pollinations] Key 额度不足({e.code}), 切换到 key #{_current_key_idx}")
-                        break  # 跳到下一个 key
+                    if e.code in (429, 402, 403) and key:
+                        _current_key_idx = (
+                            _current_key_idx + 1) % len(POLLINATIONS_KEYS)
+                        print(f"[Poll] Key #{ki} 额度不足({e.code}),"
+                              f" 切换下一个")
+                        break  # 跳到下一个 key / 无 key 兜底
                     raise
             if data is not None:
+                if key is None and use_key:
+                    print("[Poll] 所有Key耗尽，已降级为免费模式")
                 break
         if data is None:
-            raise last_err or Exception("请求失败，请重试")
+            raise last_err or Exception("所有Key额度耗尽且免费模式也失败")
 
         # 保存到本地
         ts = int(time.time())
@@ -357,6 +495,7 @@ def pollinations_generate():
         fpath = os.path.join(OUTPUT_DIR, fname)
         with open(fpath, "wb") as f:
             f.write(data)
+        _auto_archive(fpath)
 
         return jsonify({
             "url": f"/api/image/{fname}",

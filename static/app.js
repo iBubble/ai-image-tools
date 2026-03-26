@@ -9,7 +9,10 @@
     let currentFilename = '';
     let character = '';
     let refineModel = 'moody';
-    const history = [];
+    let isUploaded = false;  // 区分上传图(低denoise保构图) vs 生成图(高denoise精修)
+    // 从 localStorage 恢复历史记录
+    let history = [];
+    try { history = JSON.parse(localStorage.getItem('imgStudioHistory') || '[]'); } catch(e) { history = []; }
 
     // ── DOM ──
     const $prompt = document.getElementById('prompt');
@@ -102,11 +105,31 @@
     function hideStatus() { $status.style.display = 'none'; }
 
     // ── 显示图片 ──
+    function updateImageMeta(filename) {
+        const meta = document.getElementById('image-meta');
+        if (!meta) return;
+        if (!filename) {
+            meta.style.display = 'none';
+            return;
+        }
+        // 解析文件名: poll_177_12345.jpg 或 refined_177_67890.png
+        let parts = filename.split('.')[0].split('_');
+        if (parts.length >= 3) {
+            const seed = parts[parts.length - 1];
+            const type = parts[0] === 'poll' ? 'Pollinations' : 'ComfyUI';
+            meta.innerHTML = `🌟 引擎: <b>${type}</b> &nbsp;|&nbsp; 🎲 Seed: <b style="user-select:all; cursor:pointer;" title="双击复制">${seed}</b>`;
+            meta.style.display = 'block';
+        } else {
+            meta.style.display = 'none';
+        }
+    }
+
     function showImage(url) {
         $image.src = url;
         $image.style.display = 'block';
         $placeholder.style.display = 'none';
         currentFilename = url.split('/').pop();
+        updateImageMeta(currentFilename);
         // 启用推送/精修按钮
         document.getElementById('push-feishu').disabled = false;
         document.getElementById('push-lab').disabled = false;
@@ -115,8 +138,12 @@
     }
 
     function addHistory(url) {
+        // 去重
+        history = history.filter(u => u !== url);
         history.unshift(url);
-        if (history.length > 20) history.pop();
+        if (history.length > 10) history = history.slice(0, 10);
+        // 持久化到 localStorage
+        try { localStorage.setItem('imgStudioHistory', JSON.stringify(history)); } catch(e) {}
         renderHistory();
     }
 
@@ -129,10 +156,17 @@
                 $image.src = url;
                 $image.style.display = 'block';
                 $placeholder.style.display = 'none';
+                currentFilename = url.split('/').pop();
+                updateImageMeta(currentFilename);
+                document.getElementById('push-feishu').disabled = false;
+                document.getElementById('push-lab').disabled = false;
+                document.getElementById('refine-btn').disabled = false;
             });
             $historyGrid.appendChild(img);
         });
     }
+    // 页面加载时恢复历史
+    if (history.length > 0) renderHistory();
 
     // ── 生成 ──
     function setLoading(on) {
@@ -190,8 +224,20 @@
         const data = await resp.json();
         if (data.error) throw new Error(data.error);
         showImage(data.url);
+        isUploaded = false;
         showStatus('success',
             `✅ ${keyLabel} | seed: ${data.seed} | model: ${data.model}`);
+        // 自动精修
+        if (document.getElementById('auto-refine').checked) {
+            if (!character) {
+                showStatus('error', '⚠️ 自动精修需要先选择人物预设');
+            } else {
+                setTimeout(() => refineImage(), 500);
+            }
+        }
+        
+        // 刷新额度
+        fetchQuota();
     }
 
     async function generateComfyUI(prompt) {
@@ -276,7 +322,7 @@
                     filename: currentFilename,
                     character: character,
                     camera: cameraOverride || refineModel,
-                    denoise: 0.45,
+                    denoise: document.getElementById('cartoon-mode').checked ? 0.65 : 'auto',
                     scene_prompt: $prompt.value.trim(),
                     seed: -1
                 })
@@ -284,8 +330,9 @@
             const data = await resp.json();
             if (data.error) throw new Error(data.error);
             showImage(data.url);
+            const typeLabel = data.img_type === 'cartoon' ? '🎨卡通' : '📷真人';
             showStatus('success',
-                `✅ 精修完成 | denoise: ${data.denoise} | model: ${data.model}`);
+                `✅ 精修完成 | ${typeLabel} | denoise: ${data.denoise} | model: ${data.model}`);
         } catch(e) {
             showStatus('error', `❌ 精修失败: ${e.message}`);
         } finally {
@@ -307,6 +354,7 @@
             const upData = await up.json();
             if (!upData.ok) throw new Error(upData.error);
             currentFilename = upData.filename;
+            isUploaded = true;
             showImage(upData.url);
             showStatus('success',
                 '✅ 上传成功，可点击精修按钮进行二次处理');
@@ -316,4 +364,21 @@
         }
         input.value = '';
     };
+
+    // ── 额度查询 ──
+    async function fetchQuota() {
+        const span = document.getElementById('quota-display');
+        if (!span) return;
+        try {
+            const r = await fetch('/api/pollinations/quota');
+            const d = await r.json();
+            span.innerText = `⚡ Pollinations 剩余额度: ${d.balance.toFixed(3)} pt (约可生成 ${d.images_left} 张)`;
+            span.style.color = d.images_left < 20 ? '#ff4d4f' : '#a0a0a0';
+        } catch(e) {
+            span.innerText = `⚡ Pollinations 剩余额度: 获取失败`;
+        }
+    }
+    
+    fetchQuota();
+    setInterval(fetchQuota, 600000); // 10分钟
 })();
