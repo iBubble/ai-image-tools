@@ -134,6 +134,7 @@
         document.getElementById('push-feishu').disabled = false;
         document.getElementById('push-lab').disabled = false;
         document.getElementById('refine-btn').disabled = false;
+        document.getElementById('download-btn').disabled = false;
         addHistory(url);
     }
 
@@ -161,6 +162,7 @@
                 document.getElementById('push-feishu').disabled = false;
                 document.getElementById('push-lab').disabled = false;
                 document.getElementById('refine-btn').disabled = false;
+                document.getElementById('download-btn').disabled = false;
             });
             $historyGrid.appendChild(img);
         });
@@ -293,6 +295,16 @@
     }
     window.pushToFeishu = () => _push('/api/push/feishu', '推送到飞书');
     window.pushToLab = () => _push('/api/push/lab', '推送到实验室');
+
+    window.downloadImage = () => {
+        if (!currentFilename) return;
+        const a = document.createElement('a');
+        a.href = `/api/image/${currentFilename}`;
+        a.download = currentFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
 
     window.setRefineModel = (val) => {
         refineModel = val;

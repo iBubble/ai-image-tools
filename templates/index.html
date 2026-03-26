@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image Studio — AI 图片工作台</title>
-    <link rel="stylesheet" href="/static/style.css?v=6">
+    <link rel="stylesheet" href="/static/style.css?v=7">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -140,6 +140,9 @@
                 <button class="btn-push btn-refine" id="refine-btn" onclick="refineImage()" disabled>
                     🔄 精修
                 </button>
+                <button class="btn-push btn-download" id="download-btn" onclick="downloadImage()" disabled>
+                    💾 下载
+                </button>
                 <label class="btn-push btn-upload" for="upload-file">
                     ⬆️ 上传
                 </label>
@@ -158,6 +161,6 @@
         </section>
     </main>
 
-    <script src="/static/app.js?v=14"></script>
+    <script src="/static/app.js?v=15"></script>
 </body>
 </html>

@@ -9,6 +9,26 @@ import time
 import random
 import urllib.request
 import urllib.error
+from PIL import Image as PILImage
+
+# 全局常量：进入系统的图片最长边上限
+MAX_LONG_EDGE = 1920
+# 精修专用：送入 ComfyUI 的图片最长边上限（Z-Image 最优分辨率）
+REFINE_MAX_LONG_EDGE = 1216
+
+def auto_resize_image(filepath):
+    """等比缩放图片，确保最长边不超过 MAX_LONG_EDGE，对齐 8 像素"""
+    img = PILImage.open(filepath)
+    w, h = img.size
+    long_edge = max(w, h)
+    if long_edge > MAX_LONG_EDGE:
+        scale = MAX_LONG_EDGE / long_edge
+        new_w = int(w * scale) // 8 * 8
+        new_h = int(h * scale) // 8 * 8
+        img = img.resize((new_w, new_h), PILImage.LANCZOS)
+        img.save(filepath)
+        print(f"[AutoResize] {w}×{h} → {new_w}×{new_h}")
+    img.close()
 from flask import Flask, render_template, request, jsonify, send_file
 
 PROJECT_ROOT = "/Users/gemini/Projects/Own/Antigravity/AntigravityFixed"
@@ -21,6 +41,7 @@ COMFYUI_HISTORY = f"{COMFYUI_URL}/history"
 COMFYUI_OUTPUT = "/Users/gemini/Projects/Own/ComfyUI/output"
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "outputs")
 POLLINATIONS_KEYS = [
+    "sk_994CJSpjwX3HCdvUIboYN9mP6YGOsY30",
     "sk_pmBF6hTFDV0UFDFGHRsTHTlPG4GYP9ej",
     "sk_pLuQA5NZZgXfG7XSCzyqDD0vY6s1MM3o",
     "sk_TYdr9KBbpS4VbLoL3k6dGJGrZWnDqfrN",
@@ -283,7 +304,19 @@ def refine_image():
 
         input_name = f"refine_{int(time.time())}.png"
         input_path = os.path.join(COMFYUI_INPUT, input_name)
-        os.system(f"cp '{fpath}' '{input_path}'")
+
+        # 精修专用缩放：确保送入 ComfyUI 的图片在 Z-Image 最优分辨率内
+        img_pil = PILImage.open(fpath)
+        w, h = img_pil.size
+        long_edge = max(w, h)
+        if long_edge > REFINE_MAX_LONG_EDGE:
+            scale = REFINE_MAX_LONG_EDGE / long_edge
+            new_w = int(w * scale) // 8 * 8
+            new_h = int(h * scale) // 8 * 8
+            img_pil = img_pil.resize((new_w, new_h), PILImage.LANCZOS)
+            print(f"[Refine] 缩放: {w}×{h} → {new_w}×{new_h}")
+        img_pil.save(input_path, format="PNG")
+        img_pil.close()
 
         ts = int(time.time())
         prefix = f"refined_{ts}_{seed}"
@@ -352,7 +385,7 @@ def serve_image(filename):
 
 @app.route("/api/upload", methods=["POST"])
 def upload_image():
-    """上传图片到 outputs 目录"""
+    """上传图片到 outputs 目录（自动缩放超大图）"""
     if 'file' not in request.files:
         return jsonify({"error": "没有文件"}), 400
     f = request.files['file']
@@ -362,6 +395,7 @@ def upload_image():
     fname = f"upload_{ts}.png"
     fpath = os.path.join(OUTPUT_DIR, fname)
     f.save(fpath)
+    auto_resize_image(fpath)
     return jsonify({"ok": True, "filename": fname,
                     "url": f"/api/image/{fname}"})
 
@@ -429,17 +463,31 @@ def pollinations_generate():
         else:
             params["negative_prompt"] = default_neg
 
-        encoded = urllib.request.quote(prompt.strip())
-        qs = "&".join(f"{k}={urllib.request.quote(v)}"
-                      for k, v in params.items())
-        url = f"https://gen.pollinations.ai/image/{encoded}"
-        if qs:
-            url += f"?{qs}"
+        # --- [重大升级] 响应最新 Pollinations 文档（v1 JSON 规范） ---
+        url = "https://gen.pollinations.ai/v1/images/generations"
+        req_headers = {
+            "User-Agent": "ImageStudio/1.0",
+            "Content-Type": "application/json"
+        }
+        
+        # 组装受官方高权认可的 OpenAI Compatible 负荷载体
+        payload = {
+            "prompt": prompt,
+            "model": params.get("model", "flux"),
+            "size": f"{params.get('width', 1024)}x{params.get('height', 1024)}",
+            "response_format": "b64_json"
+        }
+        if "seed" in params: payload["seed"] = int(params["seed"])
+        if "negative_prompt" in params: payload["negative_prompt"] = params["negative_prompt"]
+        if "enhance" in params: payload["enhance"] = str(params["enhance"]).lower() == 'true'
+        if "safe" in params: payload["safe"] = str(params["safe"]).lower() == 'true'
+        
+        json_data = __import__("json").dumps(payload).encode('utf-8')
 
-        headers = {"User-Agent": "ImageStudio/1.0"}
         use_key = body.get("use_key", False)
+        custom_key = body.get("pollinations_key", "") or body.get("custom_key", "")
 
-        # 带 key 轮换 + 网络重试 + 402 自动降级的请求逻辑
+        # 带 key 轮换与容灾重发系统
         import ssl
         global _current_key_idx
         max_net_retries = 3
@@ -447,40 +495,47 @@ def pollinations_generate():
         data = None
         ct = "image/jpeg"
         
-        # 构建尝试顺序：所有 Key → 无 Key 兜底
+        # 凭证梯队组网：绝对尊贵私人 Custom Key → 高权本地锁列 → 最末级免费乞讨池
         key_list = []
-        if use_key and POLLINATIONS_KEYS:
-            for i in range(len(POLLINATIONS_KEYS)):
-                idx = (_current_key_idx + i) % len(POLLINATIONS_KEYS)
-                key_list.append(POLLINATIONS_KEYS[idx])
-        key_list.append(None)  # 最后一轮：无 Key 免费模式兜底
+        if use_key:
+            if custom_key: key_list.append(custom_key)
+            if POLLINATIONS_KEYS:
+                for i in range(len(POLLINATIONS_KEYS)):
+                    idx = (_current_key_idx + i) % len(POLLINATIONS_KEYS)
+                    key_list.append(POLLINATIONS_KEYS[idx])
+        key_list.append(None)
         
+        # 射击！带上您的高级金钥与 JSON 弹头撞开大门！
         for ki, key in enumerate(key_list):
-            req_headers = dict(headers)
+            run_headers = dict(req_headers)
             if key:
-                req_headers["Authorization"] = f"Bearer {key}"
+                run_headers["Authorization"] = f"Bearer {key}"
             for retry in range(max_net_retries):
                 try:
-                    req = urllib.request.Request(url, headers=req_headers)
+                    req = urllib.request.Request(url, data=json_data, headers=run_headers, method="POST")
                     with urllib.request.urlopen(req, timeout=180) as resp:
-                        data = resp.read()
-                        ct = resp.headers.get("Content-Type", "image/jpeg")
+                        res_json = __import__("json").loads(resp.read())
+                        b64_str = res_json.get('data', [{}])[0].get('b64_json')
+                        if b64_str:
+                            import base64
+                            data = base64.b64decode(b64_str)
+                            ct = "image/jpeg"
                     break
-                except (ssl.SSLError, ConnectionResetError,
-                        urllib.error.URLError) as e:
-                    last_err = e
-                    print(f"[Poll] 网络错误(retry {retry+1}): {e}")
-                    time.sleep(2)
-                    continue
                 except urllib.error.HTTPError as e:
                     last_err = e
-                    if e.code in (429, 402, 403) and key:
+                    if e.code in (401, 429, 402, 403) and key:
                         _current_key_idx = (
                             _current_key_idx + 1) % len(POLLINATIONS_KEYS)
                         print(f"[Poll] Key #{ki} 额度不足({e.code}),"
                               f" 切换下一个")
                         break  # 跳到下一个 key / 无 key 兜底
                     raise
+                except (ssl.SSLError, ConnectionResetError,
+                        urllib.error.URLError) as e:
+                    last_err = e
+                    print(f"[Poll] 网络错误(retry {retry+1}): {e}")
+                    time.sleep(2)
+                    continue
             if data is not None:
                 if key is None and use_key:
                     print("[Poll] 所有Key耗尽，已降级为免费模式")
