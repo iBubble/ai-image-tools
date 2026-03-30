@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image Studio — AI 图片工作台</title>
-    <link rel="stylesheet" href="/static/style.css?v=8">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="stylesheet" href="/static/style.css?v=9">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -49,7 +50,10 @@
 
             <!-- Prompt -->
             <div class="field">
-                <label>场景提示词</label>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <label style="margin: 0;">场景提示词</label>
+                    <button id="btn-random-prompt" style="padding: 2px 8px; font-size: 12px; background: #8b5cf6; border: none; color: white; border-radius: 4px; cursor: pointer;">🎲 随机生成</button>
+                </div>
                 <textarea id="prompt" rows="3"
                     placeholder="输入场景描述，人物 prompt 自动注入..."></textarea>
             </div>
@@ -122,6 +126,10 @@
                 <button class="btn-push btn-refine" id="refine-btn" onclick="refineImage()" disabled>
                     🔄 精修
                 </button>
+                <button class="btn-push btn-swap" id="swap-face-btn" onclick="swapImage('face')" disabled style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">
+                    🎭 换头
+                </button>
+
                 <button class="btn-push btn-download" id="download-btn" onclick="downloadImage()" disabled>
                     💾 下载
                 </button>
@@ -143,6 +151,6 @@
         </section>
     </main>
 
-    <script src="/static/app.js?v=16"></script>
+    <script src="/static/app.js?v=18"></script>
 </body>
 </html>

@@ -9,6 +9,8 @@ import time
 import random
 import urllib.request
 import urllib.error
+import socket
+import subprocess
 from PIL import Image as PILImage
 
 # 全局常量：进入系统的图片最长边上限
@@ -49,6 +51,32 @@ POLLINATIONS_KEYS = [
 _current_key_idx = 0
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+def ensure_comfyui_running():
+    """检测并自动唤醒 ComfyUI"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(('127.0.0.1', 8188)) == 0:
+            return True
+            
+    print("[AutoStart] 检测到 ComfyUI(8188) 未启动，正在自动唤醒...")
+    try:
+        startup_script = os.path.join(PROJECT_ROOT, "TakePhotos", "scripts", "start_comfyui.sh")
+        subprocess.Popen(["bash", startup_script], cwd=PROJECT_ROOT, 
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # 轮询等待 30次 * 2秒 = 60秒
+        for i in range(30):
+            time.sleep(2)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(('127.0.0.1', 8188)) == 0:
+                    time.sleep(3)
+                    print(f"[AutoStart] ComfyUI 已成功唤醒 (耗时大约{i*2+2}秒)")
+                    return True
+        print("[AutoStart] 唤醒 ComfyUI 超时失败")
+        return False
+    except Exception as e:
+        print(f"[AutoStart] 唤醒 ComfyUI 发生异常: {e}")
+        return False
+
 # ── 人物 Prompt 配置 ──
 RULES_DIR = os.path.join(PROJECT_ROOT, "RULES")
 CHARACTER_PROMPTS = {}
@@ -88,28 +116,44 @@ def detect_character(text):
 
 
 # ── 自动检测卡通/真人 ──
+_clip_classifier = None
+
 def _detect_cartoon(filepath):
-    """分析像素判断图片是卡通(True)还是真人照(False)"""
+    """使用 CLIP 零样本分类精准判断动漫与真人"""
+    global _clip_classifier
     try:
         from PIL import Image
-        import numpy as np
-        img = Image.open(filepath).convert("RGB").resize((128, 128))
-        arr = np.array(img, dtype=np.float32)
-        # 颜色唯一性（量化到8位色）
-        q = (arr / 32).astype(np.uint8).reshape(-1, 3)
-        uc = len(set(map(tuple, q.tolist())))
-        # 边缘锐度
-        gray = np.mean(arr, axis=2)
-        em = (np.mean(np.abs(np.diff(gray, axis=1)))
-              + np.mean(np.abs(np.diff(gray, axis=0)))) / 2
-        # 饱和度
-        mx, mn = arr.max(axis=2), arr.min(axis=2)
-        sat = np.mean(np.where(mx > 0, (mx - mn) / (mx + 1e-6), 0))
-        sc = (2 if uc < 600 else 1 if uc < 900 else 0)
-        sc += (1 if em > 18 else 0) + (1 if sat > 0.35 else 0)
-        return sc >= 2
-    except Exception:
+        img = Image.open(filepath).convert("RGB")
+        
+        # 懒加载 CLIP 模型，仅在第一次调用时加载
+        if _clip_classifier is None:
+            from transformers import pipeline
+            import torch
+            
+            device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
+            _clip_classifier = pipeline(
+                "zero-shot-image-classification",
+                model="openai/clip-vit-base-patch32",
+                device=device
+            )
+            
+        res = _clip_classifier(img, candidate_labels=["anime cartoon game illustration", "photorealistic real person photography"])
+        
+        # res 形如 [{'label': 'anime...', 'score': 0.99}, ...]
+        # 找到 'anime' 的得分
+        anime_score = 0
+        for r in res:
+            if "anime" in r["label"]:
+                anime_score = r["score"]
+                break
+                
+        # 如果动漫得分 > 0.55 则认为是动漫
+        return anime_score > 0.55
+        
+    except Exception as e:
+        print(f"[Detect Error] {e}")
         return False  # 检测失败默认当真人
+
 
 
 # ── 自动归档 + 推送（后台线程，不阻塞请求） ──
@@ -178,12 +222,12 @@ def index():
 
 @app.route("/api/characters")
 def get_characters():
-    """返回可用人物列表"""
-    chars = []
-    for key in CHARACTER_PROMPTS:
-        label = {"xiaoni": "小妮", "xiaoai": "小爱",
-                 "xiaoli": "小丽"}.get(key, key)
-        chars.append({"key": key, "label": label})
+    """返回可用人物列表，固定顺序：小妮、小爱、小丽"""
+    chars = [
+        {"key": "xiaoai", "label": "小爱"},
+        {"key": "xiaoni", "label": "小妮"},
+        {"key": "xiaoli", "label": "小丽"}
+    ]
     return jsonify({"characters": chars})
 
 
@@ -191,6 +235,9 @@ def get_characters():
 def comfyui_generate():
     """通过ComfyUI生成图片"""
     try:
+        if not ensure_comfyui_running():
+            return jsonify({"error": "自动唤醒 ComfyUI 失败，请查看日志或手动启动"}), 503
+            
         from TakePhotos.prompts.slave_prompt_library import (
             build_zit_workflow
         )
@@ -199,13 +246,14 @@ def comfyui_generate():
         negative = body.get("negative_prompt", "")
         camera = body.get("model", "moody")
 
-        # 自动检测人物 / 手动指定人物
+        # 去除原有的手动合并和强制 pure_mode=True
         char_key = body.get("character") or detect_character(positive)
-        char_prompt = ""
         if char_key and char_key in CHARACTER_PROMPTS:
-            char_prompt = CHARACTER_PROMPTS[char_key]
-            # 用人物基础 prompt 替换，用户输入追加在后面作为场景补充
-            positive = char_prompt + ", " + positive
+            from TakePhotos.prompts.slave_prompt_library import set_active_character
+            set_active_character(char_key)
+            pure_mode = False
+        else:
+            pure_mode = True
 
         seed = body.get("seed")
         if seed is None or seed == "" or seed == -1:
@@ -219,7 +267,7 @@ def comfyui_generate():
         wf = build_zit_workflow(
             positive=positive, negative=negative,
             camera=camera, seed=seed,
-            filename_prefix=prefix, pure_mode=True
+            filename_prefix=prefix, pure_mode=pure_mode
         )
 
         data = json.dumps({"prompt": wf}).encode("utf-8")
@@ -269,8 +317,12 @@ COMFYUI_INPUT = "/Users/gemini/Projects/Own/ComfyUI/input"
 def refine_image():
     """精修模式：用 ComfyUI img2img 重绘已生成的图片"""
     try:
+        if not ensure_comfyui_running():
+            return jsonify({"error": "自动唤醒 ComfyUI 失败，请查看日志或手动启动"}), 503
+            
         from TakePhotos.prompts.slave_prompt_library import (
-            build_zit_img2img_workflow, set_active_character
+            build_zit_img2img_workflow, build_anime2real_workflow,
+            set_active_character
         )
         body = request.json
         filename = body.get("filename", "")
@@ -283,16 +335,21 @@ def refine_image():
         denoise_input = body.get("denoise", "auto")
         scene = body.get("scene_prompt", "")
 
-        # 自动检测卡通/真人
-        is_cartoon_img = False
-        if denoise_input == "auto" or denoise_input is None:
-            is_cartoon_img = _detect_cartoon(fpath)
-            denoise = 0.65 if is_cartoon_img else 0.55
-            print(f"[Refine] 自动检测: "
-                  f"{'卡通' if is_cartoon_img else '真人'} → "
-                  f"denoise={denoise}")
+        is_cartoon_input = body.get("is_cartoon")
+        if is_cartoon_input is not None:
+            is_cartoon_img = bool(is_cartoon_input)
+            denoise = 0.75 if is_cartoon_img else (0.55 if denoise_input == "auto" else float(denoise_input))
+            print(f"[Refine] 前端指定: {'卡通' if is_cartoon_img else '真人'}, denoise={denoise}")
         else:
-            denoise = float(denoise_input)
+            # 兼容老版本前端兜底
+            if denoise_input == "auto" or denoise_input is None:
+                is_cartoon_img = _detect_cartoon(fpath)
+                denoise = 0.75 if is_cartoon_img else 0.55
+                print(f"[Refine] 自动检测: {'卡通' if is_cartoon_img else '真人'}, denoise={denoise}")
+            else:
+                denoise = float(denoise_input)
+                is_cartoon_img = (denoise == 0.65)
+                print(f"[Refine] 前端指定: {'卡通(0.65)' if is_cartoon_img else '真人(其他)'}")
         seed = body.get("seed")
         if seed is None or seed == "" or seed == -1:
             seed = random.randint(1, 10**12)
@@ -305,7 +362,7 @@ def refine_image():
         input_name = f"refine_{int(time.time())}.png"
         input_path = os.path.join(COMFYUI_INPUT, input_name)
 
-        # 精修专用缩放：确保送入 ComfyUI 的图片在 Z-Image 最优分辨率内
+        # 精修专用缩放：确保送入 ComfyUI 的图片在最优分辨率内
         img_pil = PILImage.open(fpath)
         w, h = img_pil.size
         long_edge = max(w, h)
@@ -321,13 +378,31 @@ def refine_image():
         ts = int(time.time())
         prefix = f"refined_{ts}_{seed}"
 
-        wf = build_zit_img2img_workflow(
-            image_filename=input_name,
-            positive=scene, negative="",
-            camera=camera, seed=seed,
-            filename_prefix=prefix,
-            denoise=denoise
-        )
+        # 提取最终处理用的图片宽高
+        final_w = new_w if 'new_w' in locals() else w
+        final_h = new_h if 'new_h' in locals() else h
+
+        # ===== 核心分支：卡通走 Anime2Real，真人走 img2img =====
+        if is_cartoon_img:
+            print(f"[Refine] 使用 Anime2Real 管线 "
+                  f"(Florence2+DepthAnything+ControlNet)")
+            wf = build_anime2real_workflow(
+                image_filename=input_name,
+                positive=scene, negative="",
+                camera=camera, seed=seed,
+                filename_prefix=prefix,
+                denoise=denoise,
+                width=final_w,
+                height=final_h
+            )
+        else:
+            wf = build_zit_img2img_workflow(
+                image_filename=input_name,
+                positive=scene, negative="",
+                camera=camera, seed=seed,
+                filename_prefix=prefix,
+                denoise=denoise
+            )
 
         data = json.dumps({"prompt": wf}).encode("utf-8")
         req = urllib.request.Request(COMFYUI_PROMPT, data=data)
@@ -335,7 +410,7 @@ def refine_image():
             pid = json.loads(r.read())["prompt_id"]
 
         img_name = None
-        for _ in range(60):
+        for _ in range(120):  # 120 * 5s = 10分钟 (给Florence2留足初始加载时间)
             try:
                 r = urllib.request.urlopen(
                     f"{COMFYUI_HISTORY}/{pid}")
@@ -368,11 +443,120 @@ def refine_image():
             "character": char_key,
             "img_type": "cartoon" if is_cartoon_img else "photo"
         })
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        print(f"[Refine] ComfyUI HTTP {e.code}: {body[:500]}")
+        return jsonify({"error": f"ComfyUI 拒绝工作流: {body[:200]}"}), 502
     except (ConnectionRefusedError, urllib.error.URLError) as e:
+        import traceback; traceback.print_exc()
         return jsonify({"error": "ComfyUI 未启动，请先运行 ComfyUI (端口 8188)"}), 503
     except Exception as e:
+        import traceback; traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+
+# ━━━━━━━ 渐进式替换（换脸 / 换身 / 换人） ━━━━━━━
+# mode=face:  denoise=0.65 换头（五官+发型+发色），保姿势场景
+# mode=body:  denoise=0.78 换身（头+身材胸型），保姿势
+# mode=full:  denoise=0.88 换人（几乎全部重画，仅保大致构图）
+SWAP_DENOISE = {"face": 0.65, "body": 0.78, "full": 0.88}
+
+@app.route("/api/swap", methods=["POST"])
+def swap_image():
+    """渐进式替换：按 mode 控制重绘程度"""
+    try:
+        if not ensure_comfyui_running():
+            return jsonify({"error": "自动唤醒 ComfyUI 失败，请查看日志或手动启动"}), 503
+            
+        from TakePhotos.prompts.slave_prompt_library import (
+            build_zit_img2img_workflow, set_active_character
+        )
+        body = request.json
+        fname = body.get("filename", "")
+        fpath = os.path.join(OUTPUT_DIR, fname)
+        if not os.path.exists(fpath):
+            return jsonify({"error": f"文件不存在: {fname}"}), 404
+
+        mode = body.get("mode", "face")
+        denoise = SWAP_DENOISE.get(mode, 0.55)
+        camera = body.get("camera", "moody")
+        char_key = body.get("character", "")
+        scene = body.get("scene_prompt", "")
+        seed = body.get("seed")
+        if seed is None or seed == "" or seed == -1:
+            seed = random.randint(1, 10**12)
+        else:
+            seed = int(seed)
+
+        if char_key:
+            set_active_character(char_key)
+
+        # 缩放图片到安全分辨率
+        input_name = f"swap_{int(time.time())}.png"
+        input_path = os.path.join(COMFYUI_INPUT, input_name)
+        img_pil = PILImage.open(fpath)
+        w, h = img_pil.size
+        long_edge = max(w, h)
+        if long_edge > REFINE_MAX_LONG_EDGE:
+            scale = REFINE_MAX_LONG_EDGE / long_edge
+            w = int(w * scale) // 8 * 8
+            h = int(h * scale) // 8 * 8
+            img_pil = img_pil.resize((w, h), PILImage.LANCZOS)
+        img_pil.save(input_path, format="PNG")
+        img_pil.close()
+
+        ts = int(time.time())
+        prefix = f"swap_{mode}_{ts}_{seed}"
+
+        wf = build_zit_img2img_workflow(
+            image_filename=input_name,
+            positive=scene, negative="",
+            camera=camera, seed=seed,
+            filename_prefix=prefix,
+            denoise=denoise
+        )
+
+        data = json.dumps({"prompt": wf}).encode("utf-8")
+        req = urllib.request.Request(COMFYUI_PROMPT, data=data)
+        with urllib.request.urlopen(req) as r:
+            pid = json.loads(r.read())["prompt_id"]
+
+        img_name = None
+        for _ in range(120):
+            try:
+                r = urllib.request.urlopen(f"{COMFYUI_HISTORY}/{pid}")
+                hist = json.loads(r.read())
+                if pid in hist:
+                    outs = hist[pid].get("outputs", {})
+                    for nid in outs:
+                        if "images" in outs[nid]:
+                            img_name = outs[nid]["images"][0]["filename"]
+                            break
+            except Exception:
+                pass
+            if img_name:
+                break
+            time.sleep(5)
+
+        if not img_name:
+            return jsonify({"error": "替换超时"}), 504
+
+        src = os.path.join(COMFYUI_OUTPUT, img_name)
+        dst = os.path.join(OUTPUT_DIR, f"{prefix}.png")
+        os.system(f"cp '{src}' '{dst}'")
+        _auto_archive(dst)
+
+        return jsonify({
+            "url": f"/api/image/{prefix}.png",
+            "seed": seed, "model": camera,
+            "denoise": denoise, "mode": mode,
+            "character": char_key
+        })
+    except (ConnectionRefusedError, urllib.error.URLError):
+        return jsonify({"error": "ComfyUI 未启动"}), 503
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/image/<filename>")
 def serve_image(filename):
@@ -429,15 +613,26 @@ def pollinations_generate():
         prompt = body.get("prompt", "")
         char_key = body.get("character", "")
         
-        # 核心漏洞修复：如果用户在界面选中了人物，必须强制将人物特征前置注入 Poll 提示词
-        # 否则 Poll 会完全依据用户写的 prompt 画，导致短发变长发等丢失特征问题
+        # ====== 强制注入：中国年轻漂亮女孩（清洗冲突词后置顶） ======
+        import re
+        _conflicts = [r'\bcaucasian\b', r'\bwhite\s+girl\b', r'\beuropean\b',
+                      r'\bkorean\b', r'\bjapanese\b', r'\bwestern\b',
+                      r'\bolder\s+woman\b', r'\bmature\s+woman\b', r'\bforeign\b',
+                      r'\bblonde\b', r'\blatina\b', r'\bafrican\b']
+        for cp in _conflicts:
+            prompt = re.sub(cp, "", prompt, flags=re.IGNORECASE)
+        # 强制注入 1girl 唯一约束与基本国籍
         if char_key and char_key in CHAR_TRAITS_DB:
-            prompt = f"({CHAR_TRAITS_DB[char_key]}:1.3), {prompt}"
+            # 为了防止底层库的人物特征与外部附加的独立名词被错认为两人，移除了独立名词 girl，仅保留国籍修饰
+            prompt = f"((solo, 1girl, one person only:2.0)), ({CHAR_TRAITS_DB[char_key]}:1.3), (chinese identity, young face:1.5), {prompt.strip(', ')}"
+        else:
+            prompt = f"((solo, 1girl, one person only:2.0)), (a young beautiful Chinese girl:1.5), {prompt.strip(', ')}"
 
-        # 自动追加写实增强词（摄影级）
-        realism_suffix = (", photorealistic, RAW photo, DSLR, "
-                          "professional photography, natural lighting, "
-                          "shallow depth of field, film grain, "
+        # 自动追加写实增强词（摄影级与电影感）
+        realism_suffix = (", Cinematic, film still, Masterpiece, high quality, "
+                          "Highly detailed, Cinematic lighting, photorealistic, RAW photo, DSLR, "
+                          "professional photography, Shallow depth of field, Bokeh, "
+                          "natural lighting, film grain, "
                           "ultra detailed, 8k uhd, high resolution")
         if "photorealistic" not in prompt.lower():
             prompt = prompt.rstrip(", ") + realism_suffix
@@ -449,6 +644,7 @@ def pollinations_generate():
 
         # 自动追加防失真负面提示词
         default_neg = ("oil painting, cartoon, anime, illustration, "
+                       "2girls, 3girls, multiple people, second person, background people, "
                        "3d render, drawing, sketch, watercolor, "
                        "extra fingers, extra limbs, mutated hands, "
                        "bad anatomy, deformed, disfigured, "

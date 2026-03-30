@@ -65,6 +65,50 @@
     });
 
     setupGroup('model-group', val => { model = val; });
+    
+    // ── 随机生成 Prompt ──
+    const $randomPromptBtn = document.getElementById('btn-random-prompt');
+    if ($randomPromptBtn) {
+        $randomPromptBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const origText = $randomPromptBtn.textContent;
+            $randomPromptBtn.disabled = true;
+            $randomPromptBtn.textContent = '⏳ 生成中...';
+            $prompt.value = '正在呼叫 AI 构思极具创意的调教场景...';
+            try {
+                // 使用 Pollinations 的 Text LLM 接口，真正即时生成非预设组合的描述
+                // 加入 seed 强制每次结果不同
+                const seed = Math.floor(Math.random() * 9999999);
+                // 改用标准的 POST JSON 格式请求，绕过 Legacy API 在客户端的废弃提示错误
+                const promptQuery = `You are a creative prompt engineer. Write a highly detailed, creative suspension shibari rope art scene with intricate knots, submissive helpless pose, and leather restraints for an image generator. You MUST include "(full body shot:1.5), (showing entire body from head to toe:1.4), wide angle" as the very first tags to ensure the character's head and feet are fully visible. Just return comma-separated booru-style tags. No explanations. random_seed=${seed}`;
+                
+                const resp = await fetch('https://text.pollinations.ai/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        messages: [{ role: 'user', content: promptQuery }],
+                        model: 'openai'
+                    })
+                });
+                
+                const txt = await resp.text();
+                // 过滤掉系统的废话或者旧提示
+                if (txt.includes("I'm sorry") || txt.includes("can't help") || txt.includes("IMPORTANT NOTICE")) {
+                    throw new Error("Text API refused or returned notice");
+                }
+                $prompt.value = txt.trim().replace(/^"|"$/g, '');
+            } catch (err) {
+                // Fallback (若接口被屏蔽)
+                const verbs = ["hogtied", "kneeling on floor", "suspended from ceiling", "frogtie pose", "strapped to x-cross"];
+                const bondage = ["heavy shibari rope bondage", "tight leather belts", "iron chains", "transparent latex suit"];
+                const pick = arr => arr[Math.floor(Math.random()*arr.length)];
+                $prompt.value = `(full body shot:1.5), (showing entire body from head to toe:1.4), wide angle, ${pick(verbs)}, ${pick(bondage)}, heavy breathing, submissive, cinematic, highly detailed`;
+            } finally {
+                $randomPromptBtn.disabled = false;
+                $randomPromptBtn.textContent = origText;
+            }
+        });
+    }
 
     // ── 加载配置 ──
     fetch('/api/config').then(r => r.json()).then(cfg => {
@@ -134,6 +178,7 @@
         document.getElementById('push-feishu').disabled = false;
         document.getElementById('push-lab').disabled = false;
         document.getElementById('refine-btn').disabled = false;
+        document.getElementById('swap-face-btn').disabled = false;
         document.getElementById('download-btn').disabled = false;
         addHistory(url);
     }
@@ -162,6 +207,7 @@
                 document.getElementById('push-feishu').disabled = false;
                 document.getElementById('push-lab').disabled = false;
                 document.getElementById('refine-btn').disabled = false;
+                document.getElementById('swap-face-btn').disabled = false;
                 document.getElementById('download-btn').disabled = false;
             });
             $historyGrid.appendChild(img);
@@ -335,7 +381,7 @@
                     character: character,
                     camera: cameraOverride || refineModel,
                     denoise: document.getElementById('cartoon-mode').checked ? 0.65 : 'auto',
-                    scene_prompt: $prompt.value.trim(),
+                    scene_prompt: "",
                     seed: -1
                 })
             });
@@ -347,6 +393,47 @@
                 `✅ 精修完成 | ${typeLabel} | denoise: ${data.denoise} | model: ${data.model}`);
         } catch(e) {
             showStatus('error', `❌ 精修失败: ${e.message}`);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = origText;
+        }
+    };
+
+    // ── 渐进式替换（换脸 / 换身 / 换人） ──
+    const SWAP_LABELS = {
+        face: {emoji: '🎭', name: '换头', time: '~30s'},
+        body: {emoji: '💃', name: '换身', time: '~60s'},
+        full: {emoji: '👤', name: '换人', time: '~90s'}
+    };
+    window.swapImage = async (mode) => {
+        if (!currentFilename) { showStatus('error', '没有可处理的图片'); return; }
+        if (!character) { showStatus('error', '请先选择人物预设'); return; }
+        const info = SWAP_LABELS[mode];
+        const btnId = `swap-${mode}-btn`;
+        const btn = document.getElementById(btnId);
+        const origText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = `⏳ ${info.name}中...`;
+        showStatus('info', `${info.emoji} ${info.name}处理中... (${info.time})`);
+        try {
+            const resp = await fetch('/api/swap', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    filename: currentFilename,
+                    character: character,
+                    camera: refineModel,
+                    mode: mode,
+                    scene_prompt: "",
+                    seed: -1
+                })
+            });
+            const data = await resp.json();
+            if (data.error) throw new Error(data.error);
+            showImage(data.url);
+            showStatus('success', `✅ ${info.name}完成 | mode: ${mode} | denoise: ${data.denoise}`);
+        } catch(e) {
+            showStatus('error', `❌ ${info.name}失败: ${e.message}`);
         } finally {
             btn.disabled = false;
             btn.textContent = origText;
