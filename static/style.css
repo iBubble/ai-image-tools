@@ -275,3 +275,51 @@ textarea:focus, input:focus, select:focus {
     main { flex-direction: column; }
     .control-panel { flex: none; max-height: none; }
 }
+
+/* 图片放大 Modal */
+.modal {
+    display: none; 
+    position: fixed; 
+    z-index: 2000; 
+    left: 0;
+    top: 0;
+    width: 100%; 
+    height: 100%; 
+    overflow: hidden; 
+    background-color: rgba(0,0,0,0.85); 
+    backdrop-filter: blur(8px);
+    cursor: zoom-out;
+}
+
+.modal-content {
+    margin: auto;
+    display: block;
+    max-width: 95%;
+    max-height: 95vh;
+    border-radius: 8px;
+    box-shadow: 0 4px 30px rgba(0,0,0,0.8);
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    object-fit: contain;
+}
+
+.modal-close {
+    position: absolute;
+    top: 20px;
+    right: 35px;
+    color: #fff;
+    font-size: 40px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 2001;
+    transition: 0.2s;
+}
+
+.modal-close:hover,
+.modal-close:focus {
+    color: #a855f7;
+    text-decoration: none;
+    cursor: pointer;
+}

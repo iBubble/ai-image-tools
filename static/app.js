@@ -480,4 +480,28 @@
     
     fetchQuota();
     setInterval(fetchQuota, 600000); // 10分钟
+
+    // ── 放大查看逻辑 ──
+    const $modal = document.getElementById('image-modal');
+    const $modalImg = document.getElementById('modal-img');
+
+    if ($image && $modal && $modalImg) {
+        $image.style.cursor = 'zoom-in';
+        $image.title = '点击放大查看';
+
+        $image.addEventListener('click', () => {
+            if ($image.src && $image.style.display !== 'none') {
+                $modal.style.display = 'block';
+                $modalImg.src = $image.src;
+                // 防止页面背景滚动
+                document.body.style.overflow = 'hidden';
+            }
+        });
+
+        // 点击 Modal 任意区域关闭
+        $modal.addEventListener('click', () => {
+            $modal.style.display = 'none';
+            document.body.style.overflow = '';
+        });
+    }
 })();
