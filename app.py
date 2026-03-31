@@ -608,7 +608,7 @@ def pollinations_quota():
 def pollinations_generate():
     """后端代理 Pollinations API（绕过 CORS）"""
     try:
-        from TakePhotos.prompts.slave_prompt_library import CHAR_TRAITS_DB
+        from TakePhotos.prompts.slave_prompt_library import CHAR_TRAITS_DB, apply_rope_protection
         body = request.json
         prompt = body.get("prompt", "")
         char_key = body.get("character", "")
@@ -658,6 +658,9 @@ def pollinations_generate():
             params["negative_prompt"] = user_neg.rstrip(", ") + ", " + default_neg
         else:
             params["negative_prompt"] = default_neg
+
+        # 挂载防止红皮束具死锁污染的防卫罩
+        prompt, params["negative_prompt"] = apply_rope_protection(prompt, params["negative_prompt"])
 
         # --- [重大升级] 响应最新 Pollinations 文档（v1 JSON 规范） ---
         url = "https://gen.pollinations.ai/v1/images/generations"
@@ -831,5 +834,5 @@ def get_config():
 
 if __name__ == "__main__":
     print("🎨 Image Studio 启动中...")
-    print("   http://localhost:5050")
-    app.run(host="0.0.0.0", port=5050, debug=False)
+    print("   http://localhost:5051")
+    app.run(host="0.0.0.0", port=5051, debug=False)

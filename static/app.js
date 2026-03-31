@@ -79,8 +79,8 @@
                 // 使用 Pollinations 的 Text LLM 接口，真正即时生成非预设组合的描述
                 // 加入 seed 强制每次结果不同
                 const seed = Math.floor(Math.random() * 9999999);
-                // 改用标准的 POST JSON 格式请求，绕过 Legacy API 在客户端的废弃提示错误
-                const promptQuery = `You are a creative prompt engineer. Write a highly detailed, creative suspension shibari rope art scene with intricate knots, submissive helpless pose, and leather restraints for an image generator. You MUST include "(full body shot:1.5), (showing entire body from head to toe:1.4), wide angle" as the very first tags to ensure the character's head and feet are fully visible. Just return comma-separated booru-style tags. No explanations. random_seed=${seed}`;
+                // 改用标准的 POST JSON 格式请求，要求直接输出中文，便于微调
+                const promptQuery = `You are a creative prompt engineer. Design a highly detailed, creative suspension shibari rope art scene with intricate knots, submissive helpless pose, and leather restraints for an image generator. Core tags: (full body shot:1.5), (showing entire body from head to toe:1.4), wide angle. Please translate all generated tags into Chinese keywords separated by commas. Return ONLY the Chinese tags. Do not explain. Example: (全身镜头:1.5), (从头到脚全身可见:1.4), 广角, 悬吊绳缚, 复杂的绳结. random_seed=${seed}`;
                 
                 const resp = await fetch('https://text.pollinations.ai/', {
                     method: 'POST',
@@ -99,10 +99,10 @@
                 $prompt.value = txt.trim().replace(/^"|"$/g, '');
             } catch (err) {
                 // Fallback (若接口被屏蔽)
-                const verbs = ["hogtied", "kneeling on floor", "suspended from ceiling", "frogtie pose", "strapped to x-cross"];
-                const bondage = ["heavy shibari rope bondage", "tight leather belts", "iron chains", "transparent latex suit"];
+                const verbs = ["后折式猪蹄缚", "双膝跪伏于地", "悬吊于天花板", "M字开腿青蛙缚", "呈大字绑在X型木架上"];
+                const bondage = ["重度日式麻绳捆绑", "极其紧绷的皮带束缚", "粗重的铁链", "全透明紧身乳胶衣"];
                 const pick = arr => arr[Math.floor(Math.random()*arr.length)];
-                $prompt.value = `(full body shot:1.5), (showing entire body from head to toe:1.4), wide angle, ${pick(verbs)}, ${pick(bondage)}, heavy breathing, submissive, cinematic, highly detailed`;
+                $prompt.value = `(全身完整镜头:1.5), (画面展示从头到脚全部身体:1.4), 广角透视, ${pick(verbs)}, ${pick(bondage)}, 剧烈粗喘, 极致顺从卑微, 电影质感光影, 极高细节表现`;
             } finally {
                 $randomPromptBtn.disabled = false;
                 $randomPromptBtn.textContent = origText;

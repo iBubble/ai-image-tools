@@ -8,7 +8,7 @@
 import json, time, os, sys, urllib.request, argparse
 from datetime import datetime
 
-API_BASE = "http://127.0.0.1:5050"
+API_BASE = "http://127.0.0.1:5051"
 OUTPUT_BASE = "/Users/gemini/Projects/Own/Antigravity/AntigravityFixed/AIGC/outputs"
 
 # 纯场景提示词（不含外貌，完全依赖 CHAR_TRAITS_DB 注入）
