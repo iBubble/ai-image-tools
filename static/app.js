@@ -111,12 +111,12 @@
     }
 
     // ── 加载配置 ──
-    fetch('/api/config').then(r => r.json()).then(cfg => {
+    fetch('./api/config').then(r => r.json()).then(cfg => {
         pollinationsKey = cfg.pollinations_key || '';
     }).catch(() => {});
 
     // ── 加载人物列表 ──
-    fetch('/api/characters').then(r => r.json()).then(data => {
+    fetch('./api/characters').then(r => r.json()).then(data => {
         const cg = document.getElementById('character-group');
         (data.characters || []).forEach(ch => {
             const b = document.createElement('button');
@@ -264,7 +264,7 @@
         const neg = ($negative.value || '').trim();
         if (neg) body.negative_prompt = neg;
 
-        const resp = await fetch('/api/pollinations/generate', {
+        const resp = await fetch('./api/pollinations/generate', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(body)
@@ -297,7 +297,7 @@
             seed: $seed.value ? parseInt($seed.value) : -1,
             character: character
         };
-        const resp = await fetch('/api/comfyui/generate', {
+        const resp = await fetch('./api/comfyui/generate', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(body)
@@ -316,7 +316,7 @@
             return;
         }
         const btn = document.getElementById(
-            endpoint === '/api/push/feishu' ? 'push-feishu' : 'push-lab');
+            endpoint === './api/push/feishu' ? 'push-feishu' : 'push-lab');
         const origText = btn.textContent;
         btn.disabled = true;
         btn.textContent = '⏳ 推送中...';
@@ -339,13 +339,13 @@
             btn.textContent = origText;
         }
     }
-    window.pushToFeishu = () => _push('/api/push/feishu', '推送到飞书');
-    window.pushToLab = () => _push('/api/push/lab', '推送到实验室');
+    window.pushToFeishu = () => _push('./api/push/feishu', '推送到飞书');
+    window.pushToLab = () => _push('./api/push/lab', '推送到实验室');
 
     window.downloadImage = () => {
         if (!currentFilename) return;
         const a = document.createElement('a');
-        a.href = `/api/image/${currentFilename}`;
+        a.href = `./api/image/${currentFilename}`;
         a.download = currentFilename;
         document.body.appendChild(a);
         a.click();
@@ -373,7 +373,7 @@
         btn.textContent = '⏳ 精修中 (~120s)...';
         showStatus('info', '🔄 ComfyUI img2img 精修中... (约 120 秒)');
         try {
-            const resp = await fetch('/api/refine', {
+            const resp = await fetch('./api/refine', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -416,7 +416,7 @@
         btn.textContent = `⏳ ${info.name}中...`;
         showStatus('info', `${info.emoji} ${info.name}处理中... (${info.time})`);
         try {
-            const resp = await fetch('/api/swap', {
+            const resp = await fetch('./api/swap', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -447,7 +447,7 @@
         const fd = new FormData();
         fd.append('file', file);
         try {
-            const up = await fetch('/api/upload', {
+            const up = await fetch('./api/upload', {
                 method: 'POST', body: fd
             });
             const upData = await up.json();
@@ -469,7 +469,7 @@
         const span = document.getElementById('quota-display');
         if (!span) return;
         try {
-            const r = await fetch('/api/pollinations/quota');
+            const r = await fetch('./api/pollinations/quota');
             const d = await r.json();
             span.innerText = `⚡ Pollinations 剩余额度: ${d.balance.toFixed(3)} pt (约可生成 ${d.images_left} 张)`;
             span.style.color = d.images_left < 20 ? '#ff4d4f' : '#a0a0a0';
@@ -514,7 +514,7 @@
     async function checkComfyStatus() {
         if (comfyStatus === 'starting' || comfyStatus === 'stopping') return;
         try {
-            const r = await fetch('/api/comfyui/status');
+            const r = await fetch('./api/comfyui/status');
             const d = await r.json();
             updateComfyBtn(d.status);
         } catch(e) {
@@ -552,17 +552,17 @@
         $comfyBtn.addEventListener('click', async () => {
             if (comfyStatus === 'running') {
                 updateComfyBtn('stopping');
-                await fetch('/api/comfyui/stop', { method: 'POST' });
+                await fetch('./api/comfyui/stop', { method: 'POST' });
                 setTimeout(checkComfyStatus, 2000);
             } else if (comfyStatus === 'stopped') {
                 updateComfyBtn('starting');
-                await fetch('/api/comfyui/start', { method: 'POST' });
+                await fetch('./api/comfyui/start', { method: 'POST' });
                 
                 let checkCount = 0;
                 const startInterval = setInterval(async () => {
                     checkCount++;
                     try {
-                        const r = await fetch('/api/comfyui/status');
+                        const r = await fetch('./api/comfyui/status');
                         const d = await r.json();
                         if (d.status === 'running') {
                             updateComfyBtn('running');

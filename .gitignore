@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 outputs/
 .DS_Store
+img_studio.log
+img_studio_nohup.log
+venv/
