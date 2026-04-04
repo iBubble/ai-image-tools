@@ -77,6 +77,34 @@ def ensure_comfyui_running():
         print(f"[AutoStart] 唤醒 ComfyUI 发生异常: {e}")
         return False
 
+@app.route("/api/comfyui/status", methods=["GET"])
+def comfyui_status():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(('127.0.0.1', 8188)) == 0:
+            return jsonify({"status": "running"})
+    return jsonify({"status": "stopped"})
+
+@app.route("/api/comfyui/start", methods=["POST"])
+def start_comfyui():
+    try:
+        startup_script = os.path.join(PROJECT_ROOT, "TakePhotos", "scripts", "start_comfyui.sh")
+        subprocess.Popen(["bash", startup_script], cwd=PROJECT_ROOT, 
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return jsonify({"ok": True, "message": "启动指令已下发"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/comfyui/stop", methods=["POST"])
+def stop_comfyui():
+    try:
+        os.system("lsof -t -i:8188 | xargs kill -9 2>/dev/null")
+        # 也可以清理可能遗留的僵尸进程 (main.py)
+        # os.system("pkill -f 'python3 main.py --listen 0.0.0.0 --port 8188'")
+        return jsonify({"ok": True, "message": "停止指令已执行"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── 人物 Prompt 配置 ──
 RULES_DIR = os.path.join(PROJECT_ROOT, "RULES")
 CHARACTER_PROMPTS = {}
@@ -130,7 +158,10 @@ def _detect_cartoon(filepath):
             from transformers import pipeline
             import torch
             
-            device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
+            # macOS M级芯片使用 mps 后台在 Flask 多线程环境下存在致命的上下文穿透 Bug 
+            # 表现为第二次在其他线程中调用 _clip_classifier(...) 时出现 Segment Fault 崩溃
+            # 解决办法：直接指派给稳定的 CPU，极小的 clip 模型 100ms 就算算完了
+            device = "cpu"
             _clip_classifier = pipeline(
                 "zero-shot-image-classification",
                 model="openai/clip-vit-base-patch32",

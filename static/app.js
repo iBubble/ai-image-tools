@@ -381,7 +381,7 @@
                     character: character,
                     camera: cameraOverride || refineModel,
                     denoise: document.getElementById('cartoon-mode').checked ? 0.65 : 'auto',
-                    scene_prompt: "",
+                    scene_prompt: document.getElementById('prompt').value.trim(),
                     seed: -1
                 })
             });
@@ -424,7 +424,7 @@
                     character: character,
                     camera: refineModel,
                     mode: mode,
-                    scene_prompt: "",
+                    scene_prompt: document.getElementById('prompt').value.trim(),
                     seed: -1
                 })
             });
@@ -503,5 +503,80 @@
             $modal.style.display = 'none';
             document.body.style.overflow = '';
         });
+    }
+
+    // ── ComfyUI 状态与控制 ──
+    const $comfyBtn = document.getElementById('comfyui-toggle-btn');
+    const $comfySpinner = document.getElementById('comfyui-spinner');
+    const $comfyText = document.getElementById('comfyui-toggle-text');
+    let comfyStatus = 'checking'; // running, stopped, checking, starting, stopping
+
+    async function checkComfyStatus() {
+        if (comfyStatus === 'starting' || comfyStatus === 'stopping') return;
+        try {
+            const r = await fetch('/api/comfyui/status');
+            const d = await r.json();
+            updateComfyBtn(d.status);
+        } catch(e) {
+            updateComfyBtn('stopped');
+        }
+    }
+
+    function updateComfyBtn(status) {
+        comfyStatus = status;
+        if (!$comfyBtn) return;
+        if (status === 'running') {
+            $comfyBtn.style.background = 'rgba(34,197,94,0.15)';
+            $comfyBtn.style.color = '#86efac';
+            $comfyText.textContent = '🖥️ ComfyUI 已启动 (点击可停止)';
+            $comfySpinner.style.display = 'none';
+        } else if (status === 'stopped') {
+            $comfyBtn.style.background = 'rgba(239,68,68,0.15)';
+            $comfyBtn.style.color = '#fca5a5';
+            $comfyText.textContent = '🔌 ComfyUI 未启动 (点击唤醒)';
+            $comfySpinner.style.display = 'none';
+        } else if (status === 'starting') {
+            $comfyBtn.style.background = 'rgba(59,130,246,0.15)';
+            $comfyBtn.style.color = '#93c5fd';
+            $comfyText.textContent = '⏳ 正在加载模型... (~30秒)';
+            $comfySpinner.style.display = 'inline-block';
+        } else if (status === 'stopping') {
+            $comfyBtn.style.background = 'rgba(245,158,11,0.15)';
+            $comfyBtn.style.color = '#fcd34d';
+            $comfyText.textContent = '🛑 正在停止...';
+            $comfySpinner.style.display = 'inline-block';
+        }
+    }
+
+    if ($comfyBtn) {
+        $comfyBtn.addEventListener('click', async () => {
+            if (comfyStatus === 'running') {
+                updateComfyBtn('stopping');
+                await fetch('/api/comfyui/stop', { method: 'POST' });
+                setTimeout(checkComfyStatus, 2000);
+            } else if (comfyStatus === 'stopped') {
+                updateComfyBtn('starting');
+                await fetch('/api/comfyui/start', { method: 'POST' });
+                
+                let checkCount = 0;
+                const startInterval = setInterval(async () => {
+                    checkCount++;
+                    try {
+                        const r = await fetch('/api/comfyui/status');
+                        const d = await r.json();
+                        if (d.status === 'running') {
+                            updateComfyBtn('running');
+                            clearInterval(startInterval);
+                        }
+                    } catch(e) {}
+                    if (checkCount > 30) { // 60秒超时
+                        clearInterval(startInterval);
+                        checkComfyStatus();
+                    }
+                }, 2000);
+            }
+        });
+        checkComfyStatus();
+        setInterval(checkComfyStatus, 10000); 
     }
 })();
