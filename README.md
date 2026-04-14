@@ -1,51 +1,93 @@
-# 🎨 AI Image & Video Tools (AIGC Core Suite)
+# 🎨 AI Image Studio & AIGC Core Suite
 
-> 一套自动化 AI 图像与视频生成、精修与业务归档工作流组合架构。
-> 由 **[Pollinations.ai](https://pollinations.ai)** 与 **ComfyUI (Hunyuan/Flux/Pony)** 双引擎驱动。
-
----
-
-## 📂 架构概览 (Directory Structure)
-
-本仓库包含了本机的核心 AIGC 调度流与业务逻辑，已分为以下几大功能区以保证绝对安全与模块隔离：
-
-### 1. `Formal/` (核心通用库与常驻程序)
-存放具有底层框架支撑性质的文件：
-*   **通信与对接层**: `comfyui_client.py`, `submit_*.py` 等，负责封装到底层显卡的 HTTP REST 请求。
-*   **守护进程**: `watch_and_update.*` 等文件维持队列的健康。
-*   **后处理流**: `push_videos.py` 等飞书 Webhook 自动化推流器和同步服务器。
-
-### 2. `Process/` (生成业务链路与历史脚本)
-存放过往针对各类精细化图生图、视频生成以及复杂业务场景（包含各类 NSFW 或肢体强校对）的一次性或阶段性构建脚本。
-包含上百个 `generate_*.py` 和对应日志，这是沉淀下来的“配方库”。
-
-### 3. `Tests/` (测试探针区)
-包含所有 `test_*.py` 及各种输出的 `.mp4` 基础基准测试资产，用于验证网络、GGUF 张量完整度以及流匹配。
-
-### 4. `pollinations/` (Web 轻量化看板)
-包含了原来的 `AI Image Studio`，一个基于 Flask 驱动的、具有真实余额监控的纯云端 Web 端操作面板。
-
-### 5. `outputs/`
-所有流转完毕的精炼图片和视频均落地与此。
+> 一套从云端轻量级 Web 面板到本地硬核 GPU 渲染的自动化 AI 图像与视频生成工作台。
+> 由 **[Pollinations.ai](https://pollinations.ai)** 与 **ComfyUI (HunyuanVideo / Flux / Pony)** 双引擎驱动。
 
 ---
 
-## 🚀 核心工作流引擎说明
+## 🚀 项目简介
 
-系统整合了两个互补的 AI 后端，分别负责不同阶段的工作：
+本项目由两大部分组成，互相配合实现了全链路的视觉资产合成：
+1. **AI Image Studio (Web 面板)**: 依赖 Pollinations 云端免费 API 与本地 ComfyUI 精修的极简生图控制台。
+2. **AIGC 核心脚本阵列 (CLI 工作流)**: 承载了针对特定人物、高度复杂的 NSFW 动作及 Hunyuan 图生视频等需深度干预的本地化全自动生产链路。
+
+系统整合了多个互补的层级，分别负责不同阶段的工作：
 
 | 阶段 | 引擎 | 作用 |
 |---|---|---|
-| **文生图 (云端)** | [Pollinations.ai](https://pollinations.ai) | 基于 Pollinations REST API 的云端图像生成，零本地 GPU 负担。在 `pollinations/img_studio` 面板 (Port: 5051) 执行。 |
-| **图生视频 (I2V)** | HunyuanVideo (GGUF) | 利用本地 48GB 统一内存加载 Q5_K_M 的 Hunyuan 视频核心，摒弃冲突 LoRA，利用纯底层推演实现 0 闪烁重绘。 |
-| **细分图生图** | ComfyUI 流 | 本地各种针对肢体、动作、高曝光的重绘约束。 |
+| **前端文生图** | [Pollinations.ai](https://pollinations.ai) | 云端集群执行，支持 Flux 等模型，极速出图，零 GPU 消耗 |
+| **底层图生图精修** | ComfyUI 节点网络 | 本地基于 Pony/Flux 等写实大模型自适应去噪、特征提取与画质跃迁 |
+| **视频生成 (I2V)** | HunyuanVideo (GGUF) | 利用 48GB Mac 统一内存加载压缩的混元大模型，生成平稳流畅的衍生动作 |
 
 ---
 
-## 🛠 最佳实践与防护墙
+## 🌐 核心模块一：AI Image Studio (Web 控制台)
 
-- **关于 LoRA 的 GGUF 兼容性**：任何时候生成视频时，目前由于 GGUF 张量的 1D 加载限制，标准 Safetensors 模块已被强制隔离阻断。后续新增动态全靠 CFG 调教！
-- **IDE 端口死锁提醒**：Pollinations 大盘的侦听端口请永远设定在 `5051`，避免与主编辑器 IDE 产生代理流量环路死锁。 
+位于 `pollinations/` 子目录中，这是一个基于 Flask 驱动的深色主题看板。
+
+### 特性亮点
+- **API 驱动与容灾降级**：所有云端请求通过 Pollinations 发送，内置多 Key 自动轮换。当 Key 耗尽时，直接进入优雅降级，防止生产停滞。
+- **角色特征强制注入**：预定义的衣着、体型模板会以 `1.3` 高权重前置压入 prompt，确保长线生产的角色风格统一。
+- **智能卡通/真人判定与修图**：底层算法侦测原图的饱和度和边缘锐度，根据不同二次元/真人比率切分不同的去噪参数交给 ComfyUI 精修。
+- **实时看板与推送**：集成飞书 Webhook 以极速发布成片。
+
+### 快速启动 Web 面板
+```bash
+cd pollinations/img_studio
+python app.py
+```
+浏览器打开 **http://localhost:5051** 即可使用。
+
+### 架构概览
+
+```
+┌─────────────────────────────────────────────────┐
+│                  Web 操作面板                     │
+│              (Flask · 端口 5051)                  │
+└──────────┬───────────────────┬──────────────────┘
+           │                   │
+        文生图              图生图精修
+           │                   │
+           ▼                   ▼
+  ┌─────────────────┐  ┌───────────────┐
+  │  Pollinations.ai │  │   ComfyUI     │
+  │   （云端 API）    │  │  （本地 GPU）  │
+  └────────┬────────┘  └──────┬────────┘
+           │                   │
+           └───────┬───────────┘
+                   ▼
+         ┌─────────────────┐
+         │    自动归档       │
+         │  飞书 · SCP 分发  │
+         └─────────────────┘
+```
 
 ---
-_Auto-synced and maintained continuously for core AI deployments._
+
+## ⚙️ 核心模块二：AIGC Python 重工业阵列
+
+位于本仓库顶级目录（及后续整理后的子目录中），是驱动离线图生视频与高规格自动化的纯血后端体系。
+
+### 📂 目录隔离结构
+*   **`Formal/` (框架核心)**: 
+    存放具有底层通信性质的库接口（如 `comfyui_client.py`，各类守护探针和接口组件）。
+*   **`Process/` (推演沉淀)**: 
+    包括海量历史留存下来的生成配置，譬如不同惩罚机制、针对性约束等复杂行为的高并发控制脚本。
+*   **`Tests/` (基线测试)**: 
+    用于排查 GGUF 引擎与不同张量块兼容性的微型探测脚本与废弃切片（如 `*.mp4` 小样）。
+
+### 🛠 Hunyuan 视频生成引擎的实战避坑指南
+- **安全阈值锁定**：因 Flow Matching 架构对于张量引导极速过敏，脚本内部的 `CFG` 应被永久锁死在 `<= 1.5` 的安全区域（本案优选 `1.0`），以避免画面出现核爆灼烧。
+- **GGUF LoRA 物理挂载隔离限制**：针对 Mac 优化极限压缩的 `Q5_K_M.gguf` 底层加载方案无法执行 2D `.safetensors` 的维次降解。因此 **任何尝试在 GGUF 混元大模型上直接覆盖图生视频 LoRA 的行为，都会导致静默失败与控制台 Error 轰炸**。当前已被全部代码隔离，使用强提示词作为最高优先级控制替代。
+
+---
+
+## 致谢
+
+- **[Pollinations.ai](https://pollinations.ai)** — 为我们的自动化流免费提供了近乎无限的生图基础算力。
+- **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** — 当代最伟大的开源计算图调度核心。
+
+---
+
+## 许可证
+MIT
