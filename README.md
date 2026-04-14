@@ -1,52 +1,60 @@
 # 🎨 AI Image Studio & AIGC Core Suite
 
 > 一套从云端轻量级 Web 面板到本地硬核 GPU 渲染的自动化 AI 图像与视频生成工作台。
+> A comprehensive automated AI image and video generation workbench, spanning from a lightweight cloud-based Web dashboard to hardcore local GPU rendering.
 > 由 **[Pollinations.ai](https://pollinations.ai)** 与 **ComfyUI (HunyuanVideo / Flux / Pony)** 双引擎驱动。
+> Dual-engine driven by **Pollinations.ai** and **ComfyUI**.
 
 ---
 
-## 🚀 项目简介
+## 🚀 项目简介 | Project Overview
 
 本项目由两大部分组成，互相配合实现了全链路的视觉资产合成：
-1. **AI Image Studio (Web 面板)**: 依赖 Pollinations 云端免费 API 与本地 ComfyUI 精修的极简生图控制台。
-2. **AIGC 核心脚本阵列 (CLI 工作流)**: 承载了针对特定人物、高度复杂的 NSFW 动作及 Hunyuan 图生视频等需深度干预的本地化全自动生产链路。
+This project consists of two major components working together to achieve full-pipeline visual asset synthesis:
+
+1. **AI Image Studio (Web 面板 | Web Dashboard)**: 依赖 Pollinations 云端免费 API 与本地 ComfyUI 精修的极简生图控制台。
+   A minimalist image generation console relying on Pollinations' free cloud API and local ComfyUI refinements.
+2. **AIGC 核心脚本阵列 (CLI 工作流 | CLI Workflow)**: 承载了针对特定人物、高度复杂的写实/动态需求及 Hunyuan 图生视频等需深度干预的本地化全自动生产链路。
+   Hosts fully automated local production pipelines requiring deep intervention, such as specific character targeting, highly complex dynamic actions, and Hunyuan image-to-video generation.
 
 系统整合了多个互补的层级，分别负责不同阶段的工作：
+The system integrates multiple complementary layers, each responsible for different stages of the workflow:
 
-| 阶段 | 引擎 | 作用 |
+| 阶段 / Stage | 引擎 / Engine | 作用 / Function |
 |---|---|---|
-| **前端文生图** | [Pollinations.ai](https://pollinations.ai) | 云端集群执行，支持 Flux 等模型，极速出图，零 GPU 消耗 |
-| **底层图生图精修** | ComfyUI 节点网络 | 本地基于 Pony/Flux 等写实大模型自适应去噪、特征提取与画质跃迁 |
-| **视频生成 (I2V)** | HunyuanVideo (GGUF) | 利用 48GB Mac 统一内存加载压缩的混元大模型，生成平稳流畅的衍生动作 |
+| **前端文生图 <br> Text-to-Image (Cloud)** | [Pollinations.ai](https://pollinations.ai) | 云端集群执行，支持 Flux 等模型，极速出图，零 GPU 消耗。<br> Executed on cloud clusters, supporting models like Flux for rapid generation with zero local GPU cost. |
+| **底层图生图精修 <br> Img2Img Refinement** | ComfyUI <br> 节点网络 Node Network | 本地基于 Pony/Flux 等写实大模型自适应去噪、特征提取与画质跃迁。<br> Local adaptive denoising, feature extraction, and quality upscaling based on realistic models like Pony/Flux. |
+| **视频生成 <br> Image-to-Video (I2V)** | HunyuanVideo (GGUF) | 利用 48GB Mac 统一内存加载压缩的混元大模型，生成平稳流畅的衍生动作。<br> Utilizes 48GB Mac unified memory to load the compressed Hunyuan model, generating smooth and fluid derivative motions. |
 
 ---
 
-## 🌐 核心模块一：AI Image Studio (Web 控制台)
+## 🌐 核心模块一：AI Image Studio (Web 控制台 | Web Console)
 
 位于 `pollinations/` 子目录中，这是一个基于 Flask 驱动的深色主题看板。
+Located in the `pollinations/` subdirectory, this is a dark-themed dashboard driven by Flask.
 
-### 特性亮点
-- **API 驱动与容灾降级**：所有云端请求通过 Pollinations 发送，内置多 Key 自动轮换。当 Key 耗尽时，直接进入优雅降级，防止生产停滞。
-- **角色特征强制注入**：预定义的衣着、体型模板会以 `1.3` 高权重前置压入 prompt，确保长线生产的角色风格统一。
-- **智能卡通/真人判定与修图**：底层算法侦测原图的饱和度和边缘锐度，根据不同二次元/真人比率切分不同的去噪参数交给 ComfyUI 精修。
-- **实时看板与推送**：集成飞书 Webhook 以极速发布成片。
+### 特性亮点 | Key Features
+- **API 驱动与容灾降级 (API Driven & Graceful Degradation)**：所有云端请求通过 Pollinations 发送，内置多 Key 自动轮换。当 Key 耗尽时，直接进入优雅降级，防止生产停滞。<br> All cloud requests are routed through Pollinations with built-in multi-key auto-rotation. When keys are exhausted, it gracefully degrades to prevent production halts.
+- **角色特征强制注入 (Forced Character Trait Injection)**：预定义的衣着、体型模板会以 `1.3` 高权重前置压入 prompt，确保长线生产的角色风格统一。<br> Predefined templates for clothing and body types are prepended to the prompt with a high `1.3` weight, ensuring unified character styles across long-term production.
+- **智能卡通/真人判定与修图 (Smart Cartoon/Photoreal Detection & Retouching)**：底层算法侦测原图的饱和度和边缘锐度，根据不同二次元/真人比率切分不同的去噪参数交给 ComfyUI 精修。<br> Underlying algorithms detect original image saturation and edge sharpness, allocating different denoising parameters to ComfyUI based on the anime-to-photoreal ratio.
+- **实时看板与推送 (Real-time Dashboard & Push)**：集成飞书 (Feishu/Lark) Webhook 以极速发布成片。<br> Integrates Feishu Webhook for lightning-fast asset distribution.
 
-### 快速启动 Web 面板
+### 快速启动 Web 面板 | Quick Start for Web Dashboard
 ```bash
 cd pollinations/img_studio
 python app.py
 ```
-浏览器打开 **http://localhost:5051** 即可使用。
+浏览器打开 / Open in browser: **http://localhost:5051**
 
-### 架构概览
+### 架构概览 | Architecture Overview
 
-```
+```text
 ┌─────────────────────────────────────────────────┐
 │                  Web 操作面板                     │
 │              (Flask · 端口 5051)                  │
 └──────────┬───────────────────┬──────────────────┘
            │                   │
-        文生图              图生图精修
+  文生图 (Text-to-Image)    图生图精修 (Img2Img Refine)
            │                   │
            ▼                   ▼
   ┌─────────────────┐  ┌───────────────┐
@@ -59,35 +67,42 @@ python app.py
          ┌─────────────────┐
          │    自动归档       │
          │  飞书 · SCP 分发  │
+         │ Auto Archive/Push │
          └─────────────────┘
 ```
 
 ---
 
-## ⚙️ 核心模块二：AIGC Python 重工业阵列
+## ⚙️ 核心模块二：AIGC Python 重工业阵列 (AIGC Python Heavy-Duty Array)
 
 位于本仓库顶级目录（及后续整理后的子目录中），是驱动离线图生视频与高规格自动化的纯血后端体系。
+Located at the top level of this repository (and organized subdirectories), this is the pure-blooded backend system driving offline image-to-video generation and high-spec automation.
 
-### 📂 目录隔离结构
-*   **`Formal/` (框架核心)**: 
-    存放具有底层通信性质的库接口（如 `comfyui_client.py`，各类守护探针和接口组件）。
-*   **`Process/` (推演沉淀)**: 
-    包括海量历史留存下来的生成配置，譬如不同惩罚机制、针对性约束等复杂行为的高并发控制脚本。
-*   **`Tests/` (基线测试)**: 
-    用于排查 GGUF 引擎与不同张量块兼容性的微型探测脚本与废弃切片（如 `*.mp4` 小样）。
+### 📂 目录隔离结构 | Directory Isolation Structure
+*   **`Formal/` (框架核心 | Framework Core)**: 
+    存放具有底层通信性质的库接口（如 `comfyui_client.py`，各类守护探针和接口组件）。<br>
+    Stores foundational communication library interfaces (e.g., `comfyui_client.py`, background watchdogs, and interface components).
+*   **`Process/` (推演沉淀 | Process Archives)**: 
+    包括海量历史留存下来的生成配置，譬如针对性约束等复杂动作的高并发控制脚本。<br>
+    Includes massive historical generation configurations, such as high-concurrency scripts for precise physical positioning and targeted anatomical constraints.
+*   **`Tests/` (基线测试 | Baseline Tests)**: 
+    用于排查 GGUF 引擎与不同张量块兼容性的微型探测脚本与废弃切片（如 `*.mp4` 小样）。<br>
+    Used for micro-probe scripts and discarded slices (`*.mp4` samples) to troubleshoot GGUF engine compatibility with different tensor blocks.
 
-### 🛠 Hunyuan 视频生成引擎的实战避坑指南
-- **安全阈值锁定**：因 Flow Matching 架构对于张量引导极速过敏，脚本内部的 `CFG` 应被永久锁死在 `<= 1.5` 的安全区域（本案优选 `1.0`），以避免画面出现核爆灼烧。
-- **GGUF LoRA 物理挂载隔离限制**：针对 Mac 优化极限压缩的 `Q5_K_M.gguf` 底层加载方案无法执行 2D `.safetensors` 的维次降解。因此 **任何尝试在 GGUF 混元大模型上直接覆盖图生视频 LoRA 的行为，都会导致静默失败与控制台 Error 轰炸**。当前已被全部代码隔离，使用强提示词作为最高优先级控制替代。
+### 🛠 Hunyuan 视频生成引擎的实战避坑指南 | Hunyuan Video Engine Troubleshooting Guide
+- **安全阈值锁定 (Safety Threshold Lock)**：因 Flow Matching 架构对于张量引导极速过敏，脚本内部的 `CFG` 应被永久锁死在 `<= 1.5` 的安全区域（本案优选 `1.0`），以避免画面出现核爆灼烧。<br>
+  Due to the Flow Matching architecture's extreme sensitivity to tensor guidance, the `CFG` within scripts should be permanently locked in the clear safety zone `<= 1.5` (optimally `1.0` here) to prevent nuclear-level visual burning.
+- **GGUF LoRA 物理挂载隔离限制 (GGUF LoRA Physical Mount Isolation Limits)**：针对 Mac 优化极限压缩的 `Q5_K_M.gguf` 底层加载方案无法执行 2D `.safetensors` 的维次降解。因此 **任何尝试在 GGUF 混元大模型上直接覆盖图生视频 LoRA 的行为，都会导致静默失败与控制台 Error 轰炸**。当前已被全部代码隔离，使用强提示词作为最高优先级控制替代。<br>
+  The `Q5_K_M.gguf` core loading scheme, heavily compressed for Mac optimization, cannot natively execute the dimensionality reduction of 2D `.safetensors`. Therefore, **ANY attempt to directly overlay standard Safetensors I2V LoRAs onto the GGUF Hunyuan base model will result in silent failure and console Error bombardment**. This has currently been fully code-isolated, using highly descriptive natural textual prompts as the overriding priority control replacement.
 
 ---
 
-## 致谢
+## 致谢 | Acknowledgements
 
-- **[Pollinations.ai](https://pollinations.ai)** — 为我们的自动化流免费提供了近乎无限的生图基础算力。
-- **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** — 当代最伟大的开源计算图调度核心。
+*   **[Pollinations.ai](https://pollinations.ai)** — 为我们的自动化流免费提供了近乎无限的生图基础算力。 (Provided near-infinite, free base-image generation computational layout for our automated workflows).
+*   **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** — 当代最伟大的开源计算图调度核心。 (The most powerful open-source computational graph scheduling core of modern times).
 
 ---
 
-## 许可证
+## 许可证 | License
 MIT
