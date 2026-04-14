@@ -1,0 +1,11 @@
+# 产出图片（体积大，不入库）
+img_studio/outputs/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 环境
+.env
+*.log

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Studio — AI 图片工作台</title>
+    <link rel="icon" type="image/png" href="./static/favicon.png">
+    <link rel="stylesheet" href="./static/style.css?v=10">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <div class="logo">🎨 Image Studio</div>
+        <div class="subtitle">ComfyUI + Pollinations 双引擎</div>
+    </header>
+
+    <main>
+        <!-- 左侧控制面板 -->
+        <section class="panel control-panel">
+            <h2>生成配置</h2>
+
+            <!-- 引擎 + 模型 同行 -->
+            <div class="field-row">
+                <div class="field">
+                    <label>引擎</label>
+                    <div class="btn-group" id="engine-group">
+                        <button class="btn-option active" data-value="pollinations">⚡ Poll</button>
+                        <button class="btn-option" data-value="comfyui">🖥️ Comfy</button>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>模型</label>
+                    <div class="btn-group" id="model-group">
+                        <button class="btn-option active" data-value="zimage">ZImage</button>
+                        <button class="btn-option" data-value="flux">Flux</button>
+                    </div>
+                </div>
+            </div>
+            <div id="quota-display" style="font-size:11px;color:#a0a0a0;margin:-8px 0 8px;">
+                ⚡ 额度: 检查中...
+            </div>
+
+            <!-- 人物预设 -->
+            <div class="field" id="character-field">
+                <label>人物预设</label>
+                <div class="btn-group" id="character-group">
+                    <button class="btn-option active" data-value="">无</button>
+                </div>
+            </div>
+
+            <!-- Prompt -->
+            <div class="field">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <label style="margin: 0;">场景提示词</label>
+                    <button id="btn-random-prompt" style="padding: 2px 8px; font-size: 12px; background: #8b5cf6; border: none; color: white; border-radius: 4px; cursor: pointer;">🎲 随机生成</button>
+                </div>
+                <textarea id="prompt" rows="3"
+                    placeholder="输入场景描述，人物 prompt 自动注入..."></textarea>
+            </div>
+
+            <!-- 高级选项（默认折叠） -->
+            <details class="advanced" open>
+                <summary>⚙️ 高级选项</summary>
+                <div class="field">
+                    <label>反向提示词</label>
+                    <textarea id="negative" rows="2"
+                        placeholder="ugly, deformed, bad anatomy..."></textarea>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Seed</label>
+                        <input type="number" id="seed" placeholder="随机" value="">
+                    </div>
+                    <div class="field">
+                        <label>尺寸</label>
+                        <select id="size">
+                            <option value="1080x1920" selected>1080×1920</option>
+                            <option value="1920x1080">1920×1080</option>
+                            <option value="1024x1024">1024×1024</option>
+                            <option value="832x1216">832×1216</option>
+                            <option value="1216x832">1216×832</option>
+                            <option value="768x1344">768×1344</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="checkbox-grid">
+                    <label class="checkbox-label"><input type="checkbox" id="safe-mode"> 🔒 安全模式</label>
+                    <label class="checkbox-label"><input type="checkbox" id="use-api-key" checked> 🔑 API Key</label>
+                    <label class="checkbox-label"><input type="checkbox" id="enhance-mode" checked> 🔮 增强画质</label>
+                    <label class="checkbox-label"><input type="checkbox" id="auto-refine"> 🔄 自动精修</label>
+                </div>
+            </details>
+
+            <!-- 生成按钮 -->
+            <button id="generate-btn" class="btn-generate">
+                <span class="btn-text">✨ 生成图片</span>
+                <span class="btn-loading" style="display:none">
+                    <span class="spinner"></span> 生成中...
+                </span>
+            </button>
+
+            <div id="status" class="status" style="display:none"></div>
+
+            <!-- ComfyUI 状态与控制 -->
+            <button id="comfyui-toggle-btn" style="margin-top: 15px; width: 100%; padding: 12px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.3s; background: rgba(59,130,246,0.15); color: #93c5fd; font-size: 14px;">
+                <span class="spinner" id="comfyui-spinner" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: currentColor;"></span>
+                <span id="comfyui-toggle-text">检查 ComfyUI 状态...</span>
+            </button>
+        </section>
+
+        <!-- 右侧图片展示 -->
+        <section class="panel output-panel">
+            <div class="image-container" id="image-container">
+                <div class="placeholder" id="placeholder">
+                    <div class="placeholder-icon">🖼️</div>
+                    <p>生成的图片将显示在这里</p>
+                    <p class="hint">Pollinations ⚡ 3~6秒 | ComfyUI 🖥️ ~100秒</p>
+                </div>
+                <img id="result-image" style="display:none" alt="生成结果">
+                <div id="image-meta" style="display:none; position:absolute; bottom:10px; left:10px; background:rgba(0,0,0,0.6); color:#fff; padding:5px 10px; border-radius:4px; font-size:0.85em; z-index:10; backdrop-filter:blur(4px);"></div>
+            </div>
+            <div class="push-actions" id="push-actions">
+                <button class="btn-push btn-feishu" id="push-feishu" onclick="pushToFeishu()" disabled>
+                    📨 推送飞书
+                </button>
+                <button class="btn-push btn-lab" id="push-lab" onclick="pushToLab()" disabled>
+                    🧪 推送实验室
+                </button>
+                <label class="btn-push" style="cursor:pointer; font-size:0.85em; display:inline-flex; align-items:center; gap:4px; padding:6px 10px;">
+                    <input type="checkbox" id="cartoon-mode"> 🎨 卡通
+                </label>
+                <button class="btn-push btn-refine" id="refine-btn" onclick="refineImage()" disabled>
+                    🔄 精修
+                </button>
+                <button class="btn-push btn-swap" id="swap-face-btn" onclick="swapImage('face')" disabled style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">
+                    🎭 换头
+                </button>
+
+                <button class="btn-push btn-download" id="download-btn" onclick="downloadImage()" disabled>
+                    💾 下载
+                </button>
+                <label class="btn-push btn-upload" for="upload-file">
+                    ⬆️ 上传
+                </label>
+                <input type="file" id="upload-file" accept="image/*"
+                       style="display:none" onchange="uploadImage(this)">
+                <div class="refine-model-group">
+                    <span class="refine-label">精修模型:</span>
+                    <button class="btn-option btn-sm active" data-value="moody" id="rm-moody" onclick="setRefineModel('moody')">Moody</button>
+                    <button class="btn-option btn-sm" data-value="pornmaster" id="rm-porn" onclick="setRefineModel('pornmaster')">Pornmaster</button>
+                </div>
+            </div>
+            <div class="history" id="history">
+                <h3>历史记录</h3>
+                <div class="history-grid" id="history-grid"></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 放大查看图片的 Modal -->
+    <div id="image-modal" class="modal">
+        <span class="modal-close">&times;</span>
+        <img class="modal-content" id="modal-img">
+    </div>
+
+    <script src="./static/app.js?v=19"></script>
+</body>
+</html>

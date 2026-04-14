@@ -1,0 +1,38 @@
+Pollinations API 测试报告 — 20260324_190329
+============================================================
+
+[01_无Key_SFW] (无Key)
+  Prompt: a beautiful chinese girl standing in a luxury hotel room, ph...
+  Model: flux
+  结果: ❌ 失败 | 1.2s | HTTP 401 | HTTP Error 401: Unauthorized
+  文件: 01_无Key_SFW_20260324_190329.jpg
+
+[02_有Key_SFW] (有Key)
+  Prompt: a beautiful chinese girl standing in a luxury hotel room, ph...
+  Model: flux
+  结果: ✅ 成功 | 5.3s | 101KB | image/jpeg
+  文件: 02_有Key_SFW_20260324_190329.jpg
+
+[03_无Key_NSFW] (无Key)
+  Prompt: a beautiful nude chinese girl, completely naked, standing ba...
+  Model: flux
+  结果: ❌ 失败 | 1.1s | HTTP 401 | HTTP Error 401: Unauthorized
+  文件: 03_无Key_NSFW_20260324_190329.jpg
+
+[04_有Key_NSFW] (有Key)
+  Prompt: a beautiful nude chinese girl, completely naked, standing ba...
+  Model: flux
+  结果: ✅ 成功 | 6.5s | 38KB | image/jpeg
+  文件: 04_有Key_NSFW_20260324_190329.jpg
+
+[05_NegPrompt测试] (有Key)
+  Prompt: a beautiful nude chinese girl, completely naked, standing ba...
+  Model: flux
+  结果: ✅ 成功 | 3.5s | 46KB | image/jpeg
+  文件: 05_NegPrompt测试_20260324_190329.jpg
+
+[06_ZImage模型] (有Key)
+  Prompt: a beautiful nude chinese girl, completely naked, standing ba...
+  Model: zimage
+  结果: ✅ 成功 | 5.6s | 39KB | image/jpeg
+  文件: 06_ZImage模型_20260324_190329.jpg
