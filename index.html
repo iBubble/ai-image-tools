@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image Studio — AI 图片工作台</title>
     <link rel="icon" type="image/png" href="./static/favicon.png">
-    <link rel="stylesheet" href="./static/style.css?v=10">
+    <link rel="stylesheet" href="./static/style.css?v=12">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -52,7 +52,19 @@
             <div class="field">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
                     <label style="margin: 0;">场景提示词</label>
-                    <button id="btn-random-prompt" style="padding: 2px 8px; font-size: 12px; background: #8b5cf6; border: none; color: white; border-radius: 4px; cursor: pointer;">🎲 随机生成</button>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <select id="prompt-theme" style="padding: 2px 6px; font-size: 11px; background: #2a2a3e; color: #a0a0cc; border: 1px solid #3a3a5e; border-radius: 4px; cursor: pointer;">
+                            <option value="">🎨 全随机</option>
+                            <option value="jav_audition">🎥 AV面试</option>
+                            <option value="love_hotel">🏨 情人旅馆</option>
+                            <option value="school_girl">🏫 校园JK</option>
+                            <option value="office_lady">💼 职场OL</option>
+                            <option value="hospital">🏥 医疗护士</option>
+                            <option value="onsen">♨️ 温泉旅馆</option>
+                            <option value="gothic">🦇 绳艺禁忌</option>
+                        </select>
+                        <button id="btn-random-prompt" style="padding: 2px 8px; font-size: 12px; background: linear-gradient(135deg, #8b5cf6, #ec4899); border: none; color: white; border-radius: 4px; cursor: pointer; white-space: nowrap; transition: transform 0.15s;">🎲 随机生成</button>
+                    </div>
                 </div>
                 <textarea id="prompt" rows="3"
                     placeholder="输入场景描述，人物 prompt 自动注入..."></textarea>
@@ -160,9 +172,12 @@
     <!-- 放大查看图片的 Modal -->
     <div id="image-modal" class="modal">
         <span class="modal-close">&times;</span>
+        <button class="modal-nav modal-prev" id="modal-prev">&#10094;</button>
         <img class="modal-content" id="modal-img">
+        <button class="modal-nav modal-next" id="modal-next">&#10095;</button>
+        <div id="modal-debug" style="position: absolute; top: 10px; left: 10px; color: #00ffcc; background: rgba(0,0,0,0.8); padding: 8px 12px; font-family: monospace; font-size: 11px; z-index: 9999; border-radius: 4px; pointer-events: none; line-height: 1.4; border: 1px solid #00ffcc;"></div>
     </div>
 
-    <script src="./static/app.js?v=19"></script>
+    <script src="./static/app.js?v=29"></script>
 </body>
 </html>

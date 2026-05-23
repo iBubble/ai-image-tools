@@ -3,10 +3,17 @@
 支持 ComfyUI 和 Pollinations 双后端
 """
 import os
+# 自动加载本地 .env 文件（静默兼容未安装 python-dotenv 的环境）
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+except ImportError:
+    pass
 import sys
 import json
 import time
 import random
+import shutil
 import urllib.request
 import urllib.error
 import socket
@@ -32,23 +39,26 @@ def auto_resize_image(filepath):
         print(f"[AutoResize] {w}×{h} → {new_w}×{new_h}")
     img.close()
 from flask import Flask, render_template, request, jsonify, send_file
+from pollinations_helper import POLLINATIONS_KEYS, FEISHU_OPEN_ID, execute_poll_generation, fetch_quota_summary
 
 PROJECT_ROOT = "/Users/gemini/Projects/Own/Antigravity/AntigravityFixed"
 sys.path.insert(0, PROJECT_ROOT)
 
 app = Flask(__name__)
+
+@app.after_request
+def add_header(response):
+    """强制禁止浏览器缓存，确保开发模式下前端代码实时生效"""
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
 COMFYUI_URL = "http://127.0.0.1:8188"
 COMFYUI_PROMPT = f"{COMFYUI_URL}/prompt"
 COMFYUI_HISTORY = f"{COMFYUI_URL}/history"
 COMFYUI_OUTPUT = "/Users/gemini/Projects/Own/ComfyUI/output"
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "outputs")
-POLLINATIONS_KEYS = [
-    "sk_994CJSpjwX3HCdvUIboYN9mP6YGOsY30",
-    "sk_pmBF6hTFDV0UFDFGHRsTHTlPG4GYP9ej",
-    "sk_pLuQA5NZZgXfG7XSCzyqDD0vY6s1MM3o",
-    "sk_TYdr9KBbpS4VbLoL3k6dGJGrZWnDqfrN",
-]
-_current_key_idx = 0
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def ensure_comfyui_running():
@@ -96,11 +106,23 @@ def start_comfyui():
 
 @app.route("/api/comfyui/stop", methods=["POST"])
 def stop_comfyui():
+    # 局域网访问控制：仅限本地回路
+    if request.remote_addr not in ("127.0.0.1", "localhost"):
+        return jsonify({"error": "Forbidden: 本地管理接口仅限 127.0.0.1 访问"}), 403
     try:
-        os.system("lsof -t -i:8188 | xargs kill -9 2>/dev/null")
-        # 也可以清理可能遗留的僵尸进程 (main.py)
-        # os.system("pkill -f 'python3 main.py --listen 0.0.0.0 --port 8188'")
-        return jsonify({"ok": True, "message": "停止指令已执行"})
+        # 安全查找 8188 端口的 PIDs 并平滑终止
+        res = subprocess.run(["lsof", "-t", "-i:8188"], capture_output=True, text=True)
+        pids = [pid.strip() for pid in res.stdout.splitlines() if pid.strip()]
+        if pids:
+            for pid in pids:
+                subprocess.run(["kill", "-15", pid]) # 软杀 (SIGTERM)
+            time.sleep(1.5)
+            # 二次验证是否仍有残留，有则强杀
+            res_check = subprocess.run(["lsof", "-t", "-i:8188"], capture_output=True, text=True)
+            active_pids = [pid.strip() for pid in res_check.stdout.splitlines() if pid.strip()]
+            for pid in active_pids:
+                subprocess.run(["kill", "-9", pid])
+        return jsonify({"ok": True, "message": "停止指令已安全执行"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -161,6 +183,8 @@ def _detect_cartoon(filepath):
             # macOS M级芯片使用 mps 后台在 Flask 多线程环境下存在致命的上下文穿透 Bug 
             # 表现为第二次在其他线程中调用 _clip_classifier(...) 时出现 Segment Fault 崩溃
             # 解决办法：直接指派给稳定的 CPU，极小的 clip 模型 100ms 就算算完了
+            # 防止因为国内网络连不上 HuggingFace 导致死锁超时验证
+            os.environ["HF_HUB_OFFLINE"] = "1"
             device = "cpu"
             _clip_classifier = pipeline(
                 "zero-shot-image-classification",
@@ -203,14 +227,14 @@ def _auto_archive(filepath):
             os.makedirs(dest_dir, exist_ok=True)
             fname = os.path.basename(filepath)
             dest = os.path.join(dest_dir, fname)
-            os.system(f"cp '{filepath}' '{dest}'")
+            shutil.copy2(filepath, dest)
             print(f"[Archive] 已保存: {dest}")
 
             # 推送飞书
             try:
                 from src.utils.feishu_notifier import FeishuNotifier
                 notifier = FeishuNotifier()
-                open_id = "ou_c456044cf7eb9ccbf478f7c2d47bf74c"
+                open_id = FEISHU_OPEN_ID
                 image_key = notifier.upload_image(filepath)
                 if image_key:
                     card = {
@@ -249,6 +273,15 @@ def _auto_archive(filepath):
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/api/random-prompt")
+def random_prompt():
+    """多维度组合式随机提示词生成器"""
+    from prompt_generator import generate_random_prompt_with_meta
+    theme = request.args.get("theme")  # 可选: gothic/cyberpunk/japanese/industrial/luxury
+    result = generate_random_prompt_with_meta(theme=theme)
+    return jsonify(result)
 
 
 @app.route("/api/characters")
@@ -331,7 +364,7 @@ def comfyui_generate():
 
         src = os.path.join(COMFYUI_OUTPUT, img_name)
         dst = os.path.join(OUTPUT_DIR, f"{prefix}.png")
-        os.system(f"cp '{src}' '{dst}'")
+        shutil.copy2(src, dst)
         _auto_archive(dst)
 
         return jsonify({
@@ -409,9 +442,9 @@ def refine_image():
         ts = int(time.time())
         prefix = f"refined_{ts}_{seed}"
 
-        # 提取最终处理用的图片宽高
-        final_w = new_w if 'new_w' in locals() else w
-        final_h = new_h if 'new_h' in locals() else h
+        # Q-06 修复：提取最终处理用的图片宽高（消除 locals() 反模式）
+        final_w = new_w if long_edge > REFINE_MAX_LONG_EDGE else w
+        final_h = new_h if long_edge > REFINE_MAX_LONG_EDGE else h
 
         # ===== 核心分支：卡通走 Anime2Real，真人走 img2img =====
         if is_cartoon_img:
@@ -464,7 +497,7 @@ def refine_image():
 
         src = os.path.join(COMFYUI_OUTPUT, img_name)
         dst = os.path.join(OUTPUT_DIR, f"{prefix}.png")
-        os.system(f"cp '{src}' '{dst}'")
+        shutil.copy2(src, dst)
         _auto_archive(dst)
 
         return jsonify({
@@ -574,7 +607,7 @@ def swap_image():
 
         src = os.path.join(COMFYUI_OUTPUT, img_name)
         dst = os.path.join(OUTPUT_DIR, f"{prefix}.png")
-        os.system(f"cp '{src}' '{dst}'")
+        shutil.copy2(src, dst)
         _auto_archive(dst)
 
         return jsonify({
@@ -591,8 +624,15 @@ def swap_image():
 
 @app.route("/api/image/<filename>")
 def serve_image(filename):
-    """提供生成的图片"""
-    path = os.path.join(OUTPUT_DIR, filename)
+    """提供生成的图片（S-05 修复：路径遍历防护）"""
+    from werkzeug.utils import secure_filename
+    safe_name = secure_filename(filename)
+    if not safe_name:
+        return "Invalid filename", 400
+    path = os.path.join(OUTPUT_DIR, safe_name)
+    # 二次校验：确保最终路径仍在 OUTPUT_DIR 内
+    if not os.path.realpath(path).startswith(os.path.realpath(OUTPUT_DIR)):
+        return "Forbidden", 403
     if os.path.exists(path):
         return send_file(path)
     return "Not found", 404
@@ -617,21 +657,11 @@ def upload_image():
 @app.route("/api/pollinations/quota", methods=["GET"])
 def pollinations_quota():
     """获取 Pollinations 全部 key 的余额总和"""
-    total = 0.0
-    for key in POLLINATIONS_KEYS:
-        try:
-            req = urllib.request.Request("https://gen.pollinations.ai/account/balance")
-            req.add_header("Authorization", f"Bearer {key}")
-            req.add_header("User-Agent", "Mozilla/5.0")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                data = json.loads(resp.read())
-                total += float(data.get("balance", 0))
-        except Exception:
-            pass
-    
+    total, fetch_success = fetch_quota_summary()
     return jsonify({
         "balance": total,
-        "images_left": int(total / 0.001)
+        "images_left": int(total / 0.002) if fetch_success else 0,
+        "fetch_success": fetch_success
     })
 
 
@@ -639,139 +669,12 @@ def pollinations_quota():
 def pollinations_generate():
     """后端代理 Pollinations API（绕过 CORS）"""
     try:
-        from TakePhotos.prompts.slave_prompt_library import CHAR_TRAITS_DB, apply_rope_protection
         body = request.json
-        prompt = body.get("prompt", "")
-        char_key = body.get("character", "")
-        
-        # ====== 强制注入：中国年轻漂亮女孩（清洗冲突词后置顶） ======
-        import re
-        _conflicts = [r'\bcaucasian\b', r'\bwhite\s+girl\b', r'\beuropean\b',
-                      r'\bkorean\b', r'\bjapanese\b', r'\bwestern\b',
-                      r'\bolder\s+woman\b', r'\bmature\s+woman\b', r'\bforeign\b',
-                      r'\bblonde\b', r'\blatina\b', r'\bafrican\b']
-        for cp in _conflicts:
-            prompt = re.sub(cp, "", prompt, flags=re.IGNORECASE)
-        # 强制注入 1girl 唯一约束与基本国籍
-        if char_key and char_key in CHAR_TRAITS_DB:
-            # 为了防止底层库的人物特征与外部附加的独立名词被错认为两人，移除了独立名词 girl，仅保留国籍修饰
-            prompt = f"((solo, 1girl, one person only:2.0)), ({CHAR_TRAITS_DB[char_key]}:1.3), (chinese identity, young face:1.5), {prompt.strip(', ')}"
-        else:
-            prompt = f"((solo, 1girl, one person only:2.0)), (a young beautiful Chinese girl:1.5), {prompt.strip(', ')}"
-
-        # 自动追加写实增强词（摄影级与电影感）
-        realism_suffix = (", Cinematic, film still, Masterpiece, high quality, "
-                          "Highly detailed, Cinematic lighting, photorealistic, RAW photo, DSLR, "
-                          "professional photography, Shallow depth of field, Bokeh, "
-                          "natural lighting, film grain, "
-                          "ultra detailed, 8k uhd, high resolution")
-        if "photorealistic" not in prompt.lower():
-            prompt = prompt.rstrip(", ") + realism_suffix
-        params = {}
-        for k in ["model", "width", "height", "seed",
-                   "negative_prompt", "safe", "enhance"]:
-            if body.get(k) is not None and body.get(k) != "":
-                params[k] = str(body[k])
-
-        # 自动追加防失真负面提示词
-        default_neg = ("oil painting, cartoon, anime, illustration, "
-                       "2girls, 3girls, multiple people, second person, background people, "
-                       "3d render, drawing, sketch, watercolor, "
-                       "extra fingers, extra limbs, mutated hands, "
-                       "bad anatomy, deformed, disfigured, "
-                       "blurry, low quality, low resolution, pixelated, "
-                       "worst quality, jpeg artifacts, "
-                       "ugly, duplicate, morbid, "
-                       "poorly drawn face, poorly drawn hands, "
-                       "overexposed, underexposed, bad proportions")
-        user_neg = params.get("negative_prompt", "")
-        if user_neg:
-            params["negative_prompt"] = user_neg.rstrip(", ") + ", " + default_neg
-        else:
-            params["negative_prompt"] = default_neg
-
-        # 挂载防止红皮束具死锁污染的防卫罩
-        prompt, params["negative_prompt"] = apply_rope_protection(prompt, params["negative_prompt"])
-
-        # --- [重大升级] 响应最新 Pollinations 文档（v1 JSON 规范） ---
-        url = "https://gen.pollinations.ai/v1/images/generations"
-        req_headers = {
-            "User-Agent": "ImageStudio/1.0",
-            "Content-Type": "application/json"
-        }
-        
-        # 组装受官方高权认可的 OpenAI Compatible 负荷载体
-        payload = {
-            "prompt": prompt,
-            "model": params.get("model", "flux"),
-            "size": f"{params.get('width', 1024)}x{params.get('height', 1024)}",
-            "response_format": "b64_json"
-        }
-        if "seed" in params: payload["seed"] = int(params["seed"])
-        if "negative_prompt" in params: payload["negative_prompt"] = params["negative_prompt"]
-        if "enhance" in params: payload["enhance"] = str(params["enhance"]).lower() == 'true'
-        if "safe" in params: payload["safe"] = str(params["safe"]).lower() == 'true'
-        
-        json_data = __import__("json").dumps(payload).encode('utf-8')
-
         use_key = body.get("use_key", False)
         custom_key = body.get("pollinations_key", "") or body.get("custom_key", "")
 
-        # 带 key 轮换与容灾重发系统
-        import ssl
-        global _current_key_idx
-        max_net_retries = 3
-        last_err = None
-        data = None
-        ct = "image/jpeg"
-        
-        # 凭证梯队组网：绝对尊贵私人 Custom Key → 高权本地锁列 → 最末级免费乞讨池
-        key_list = []
-        if use_key:
-            if custom_key: key_list.append(custom_key)
-            if POLLINATIONS_KEYS:
-                for i in range(len(POLLINATIONS_KEYS)):
-                    idx = (_current_key_idx + i) % len(POLLINATIONS_KEYS)
-                    key_list.append(POLLINATIONS_KEYS[idx])
-        key_list.append(None)
-        
-        # 射击！带上您的高级金钥与 JSON 弹头撞开大门！
-        for ki, key in enumerate(key_list):
-            run_headers = dict(req_headers)
-            if key:
-                run_headers["Authorization"] = f"Bearer {key}"
-            for retry in range(max_net_retries):
-                try:
-                    req = urllib.request.Request(url, data=json_data, headers=run_headers, method="POST")
-                    with urllib.request.urlopen(req, timeout=180) as resp:
-                        res_json = __import__("json").loads(resp.read())
-                        b64_str = res_json.get('data', [{}])[0].get('b64_json')
-                        if b64_str:
-                            import base64
-                            data = base64.b64decode(b64_str)
-                            ct = "image/jpeg"
-                    break
-                except urllib.error.HTTPError as e:
-                    last_err = e
-                    if e.code in (401, 429, 402, 403) and key:
-                        _current_key_idx = (
-                            _current_key_idx + 1) % len(POLLINATIONS_KEYS)
-                        print(f"[Poll] Key #{ki} 额度不足({e.code}),"
-                              f" 切换下一个")
-                        break  # 跳到下一个 key / 无 key 兜底
-                    raise
-                except (ssl.SSLError, ConnectionResetError,
-                        urllib.error.URLError) as e:
-                    last_err = e
-                    print(f"[Poll] 网络错误(retry {retry+1}): {e}")
-                    time.sleep(2)
-                    continue
-            if data is not None:
-                if key is None and use_key:
-                    print("[Poll] 所有Key耗尽，已降级为免费模式")
-                break
-        if data is None:
-            raise last_err or Exception("所有Key额度耗尽且免费模式也失败")
+        # 委托给共享生图引擎，安全剥离所有细节
+        data, model_used = execute_poll_generation(body, custom_key=custom_key, use_key=use_key)
 
         # 保存到本地
         ts = int(time.time())
@@ -785,7 +688,7 @@ def pollinations_generate():
         return jsonify({
             "url": f"/api/image/{fname}",
             "seed": seed,
-            "model": params.get("model", "flux"),
+            "model": model_used,
             "use_key": use_key
         })
     except urllib.error.HTTPError as e:
@@ -806,7 +709,7 @@ def push_feishu():
             return jsonify({"error": "图片文件不存在"}), 404
 
         notifier = FeishuNotifier()
-        open_id = "ou_c456044cf7eb9ccbf478f7c2d47bf74c"
+        open_id = FEISHU_OPEN_ID
         image_key = notifier.upload_image(fpath)
         if not image_key:
             return jsonify({"error": "飞书图片上传失败"}), 500
@@ -859,8 +762,9 @@ def push_lab():
 
 @app.route("/api/config")
 def get_config():
-    """返回前端配置"""
-    return jsonify({"pollinations_key": POLLINATIONS_KEYS[0] if POLLINATIONS_KEYS else ""})
+    """返回前端配置（不再泄露完整 Key）"""
+    has_key = bool(POLLINATIONS_KEYS)
+    return jsonify({"has_pollinations_key": has_key})
 
 
 if __name__ == "__main__":

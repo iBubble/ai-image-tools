@@ -10,9 +10,17 @@
     let character = '';
     let refineModel = 'moody';
     let isUploaded = false;  // 区分上传图(低denoise保构图) vs 生成图(高denoise精修)
-    // 从 localStorage 恢复历史记录
+    // 从 localStorage 恢复历史记录并严密过滤脏数据
     let history = [];
-    try { history = JSON.parse(localStorage.getItem('imgStudioHistory') || '[]'); } catch(e) { history = []; }
+    try { 
+        const raw = localStorage.getItem('imgStudioHistory');
+        history = JSON.parse(raw || '[]'); 
+        if (!Array.isArray(history)) history = [];
+        history = history.filter(x => x && (typeof x === 'string' || x.url));
+    } catch(e) { 
+        history = []; 
+    }
+    let currentBalance = null;
 
     // ── DOM ──
     const $prompt = document.getElementById('prompt');
@@ -58,51 +66,48 @@
                     x => x.classList.remove('active'));
                 b.classList.add('active');
                 model = v;
+                if (typeof updateQuotaDisplay === 'function') updateQuotaDisplay();
             });
             mg.appendChild(b);
         });
         model = models[0][0];
+        if (typeof updateQuotaDisplay === 'function') updateQuotaDisplay();
     });
 
-    setupGroup('model-group', val => { model = val; });
+    setupGroup('model-group', val => { 
+        model = val; 
+        if (typeof updateQuotaDisplay === 'function') updateQuotaDisplay();
+    });
     
-    // ── 随机生成 Prompt ──
+    // ── 随机生成 Prompt（调用后端多维度组合引擎） ──
     const $randomPromptBtn = document.getElementById('btn-random-prompt');
     if ($randomPromptBtn) {
         $randomPromptBtn.addEventListener('click', async (e) => {
             e.preventDefault();
             const origText = $randomPromptBtn.textContent;
             $randomPromptBtn.disabled = true;
-            $randomPromptBtn.textContent = '⏳ 生成中...';
-            $prompt.value = '正在呼叫 AI 构思极具创意的调教场景...';
+            $randomPromptBtn.textContent = '🎲 组合中...';
             try {
-                // 使用 Pollinations 的 Text LLM 接口，真正即时生成非预设组合的描述
-                // 加入 seed 强制每次结果不同
-                const seed = Math.floor(Math.random() * 9999999);
-                // 改用标准的 POST JSON 格式请求，要求直接输出中文，便于微调
-                const promptQuery = `You are a creative prompt engineer. Design a highly detailed, creative suspension shibari rope art scene with intricate knots, submissive helpless pose, and leather restraints for an image generator. Core tags: (full body shot:1.5), (showing entire body from head to toe:1.4), wide angle. Please translate all generated tags into Chinese keywords separated by commas. Return ONLY the Chinese tags. Do not explain. Example: (全身镜头:1.5), (从头到脚全身可见:1.4), 广角, 悬吊绳缚, 复杂的绳结. random_seed=${seed}`;
-                
-                const resp = await fetch('https://text.pollinations.ai/', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        messages: [{ role: 'user', content: promptQuery }],
-                        model: 'openai'
-                    })
-                });
-                
-                const txt = await resp.text();
-                // 过滤掉系统的废话或者旧提示
-                if (txt.includes("I'm sorry") || txt.includes("can't help") || txt.includes("IMPORTANT NOTICE")) {
-                    throw new Error("Text API refused or returned notice");
+                // 获取主题选择（如果存在下拉菜单）
+                const $themeSelect = document.getElementById('prompt-theme');
+                const theme = $themeSelect ? $themeSelect.value : '';
+                const url = theme
+                    ? `./api/random-prompt?theme=${encodeURIComponent(theme)}`
+                    : './api/random-prompt';
+                const resp = await fetch(url);
+                const data = await resp.json();
+                if (data.prompt) {
+                    $prompt.value = data.prompt;
+                    // 在控制台输出维度详情（方便调试）
+                    if (data.dimensions) {
+                        console.log('🎲 随机提示词维度:', data.dimensions);
+                    }
+                } else {
+                    throw new Error('后端返回为空');
                 }
-                $prompt.value = txt.trim().replace(/^"|"$/g, '');
             } catch (err) {
-                // Fallback (若接口被屏蔽)
-                const verbs = ["后折式猪蹄缚", "双膝跪伏于地", "悬吊于天花板", "M字开腿青蛙缚", "呈大字绑在X型木架上"];
-                const bondage = ["重度日式麻绳捆绑", "极其紧绷的皮带束缚", "粗重的铁链", "全透明紧身乳胶衣"];
-                const pick = arr => arr[Math.floor(Math.random()*arr.length)];
-                $prompt.value = `(全身完整镜头:1.5), (画面展示从头到脚全部身体:1.4), 广角透视, ${pick(verbs)}, ${pick(bondage)}, 剧烈粗喘, 极致顺从卑微, 电影质感光影, 极高细节表现`;
+                console.error('随机提示词生成失败:', err);
+                $prompt.value = '⚠️ 生成失败，请重试';
             } finally {
                 $randomPromptBtn.disabled = false;
                 $randomPromptBtn.textContent = origText;
@@ -168,47 +173,148 @@
         }
     }
 
-    function showImage(url) {
+    function showImage(url, metaOverride = {}) {
+        console.log('🔮 [ImageStudio] showImage 被调用, url:', url, 'metaOverride:', metaOverride);
         $image.src = url;
         $image.style.display = 'block';
         $placeholder.style.display = 'none';
         currentFilename = url.split('/').pop();
         updateImageMeta(currentFilename);
+        
         // 启用推送/精修按钮
-        document.getElementById('push-feishu').disabled = false;
-        document.getElementById('push-lab').disabled = false;
-        document.getElementById('refine-btn').disabled = false;
-        document.getElementById('swap-face-btn').disabled = false;
-        document.getElementById('download-btn').disabled = false;
-        addHistory(url);
+        const btns = ['push-feishu', 'push-lab', 'refine-btn', 'swap-face-btn', 'download-btn'];
+        btns.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = false;
+        });
+
+        // 构造完整的历史元数据
+        let parts = currentFilename.split('.')[0].split('_');
+        let parsedSeed = -1;
+        if (parts.length >= 3) {
+            let s = parseInt(parts[parts.length - 1]);
+            if (!isNaN(s)) parsedSeed = s;
+        }
+
+        const historyItem = {
+            url: url,
+            prompt: metaOverride.prompt || $prompt.value.trim(),
+            negative_prompt: metaOverride.negative_prompt || $negative.value.trim(),
+            seed: metaOverride.seed !== undefined ? metaOverride.seed : (parsedSeed !== -1 ? parsedSeed : ($seed.value ? parseInt($seed.value) : -1)),
+            character: metaOverride.character || character,
+            engine: metaOverride.engine || engine,
+            model: metaOverride.model || model,
+            timestamp: Date.now()
+        };
+
+        console.log('🔮 [ImageStudio] 生成的历史元数据 historyItem:', historyItem);
+        addHistory(historyItem);
     }
 
-    function addHistory(url) {
-        // 去重
-        history = history.filter(u => u !== url);
-        history.unshift(url);
+    function addHistory(item) {
+        if (!item) return;
+        const itemUrl = typeof item === 'string' ? item : item.url;
+        if (!itemUrl) return;
+
+        console.log('🔮 [ImageStudio] addHistory 被调用, 历史项 URL:', itemUrl);
+        const itemFilename = itemUrl.split('/').pop();
+
+        // 统一利用文件名进行安全且绝对的去重
+        history = history.filter(x => {
+            if (!x) return false;
+            const u = typeof x === 'string' ? x : x.url;
+            if (!u) return false;
+            return u.split('/').pop() !== itemFilename;
+        });
+
+        history.unshift(item);
         if (history.length > 20) history = history.slice(0, 20);
+
         // 持久化到 localStorage
-        try { localStorage.setItem('imgStudioHistory', JSON.stringify(history)); } catch(e) {}
+        try { 
+            localStorage.setItem('imgStudioHistory', JSON.stringify(history)); 
+            console.log('💾 [ImageStudio] 成功持久化历史记录至 localStorage');
+        } catch(e) {
+            console.error('❌ [ImageStudio] 写入 localStorage 失败:', e);
+        }
         renderHistory();
     }
 
     function renderHistory() {
+        console.log('🔮 [ImageStudio] 开始渲染历史缩略图, 当前列表大小:', history.length);
         $historyGrid.innerHTML = '';
-        history.forEach(url => {
+        history.forEach(item => {
+            if (!item) return;
+            const isStr = typeof item === 'string';
+            const url = isStr ? item : item.url;
+            if (!url) return;
             const img = document.createElement('img');
             img.src = url;
             img.addEventListener('click', () => {
-                $image.src = url;
-                $image.style.display = 'block';
-                $placeholder.style.display = 'none';
-                currentFilename = url.split('/').pop();
-                updateImageMeta(currentFilename);
-                document.getElementById('push-feishu').disabled = false;
-                document.getElementById('push-lab').disabled = false;
-                document.getElementById('refine-btn').disabled = false;
-                document.getElementById('swap-face-btn').disabled = false;
-                document.getElementById('download-btn').disabled = false;
+                try {
+                    console.log('🔮 [ImageStudio] 点击历史缩略图切换:', url);
+                    $image.src = url;
+                    $image.style.display = 'block';
+                    $placeholder.style.display = 'none';
+                    currentFilename = url.split('/').pop();
+                    updateImageMeta(currentFilename);
+
+                    // 激活所有功能按钮
+                    const btns = ['push-feishu', 'push-lab', 'refine-btn', 'swap-face-btn', 'download-btn'];
+                    btns.forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.disabled = false;
+                    });
+
+                    // 完美回填状态与参数还原
+                    if (!isStr) {
+                        if (item.prompt !== undefined) $prompt.value = item.prompt;
+                        if (item.negative_prompt !== undefined) $negative.value = item.negative_prompt;
+                        
+                        // 回填 Seed
+                        if (item.seed !== undefined && item.seed !== -1) {
+                            $seed.value = item.seed;
+                        } else {
+                            $seed.value = '';
+                        }
+
+                        // 魔法回填人物预设
+                        if (item.character !== undefined) {
+                            const cg = document.getElementById('character-group');
+                            if (cg) {
+                                const charBtn = cg.querySelector(`[data-value="${item.character}"]`);
+                                if (charBtn) charBtn.click();
+                            }
+                        }
+
+                        // 魔法回填引擎和模型
+                        if (item.engine !== undefined && item.model !== undefined) {
+                            const eg = document.getElementById('engine-group');
+                            if (eg) {
+                                const engineBtn = eg.querySelector(`[data-value="${item.engine}"]`);
+                                if (engineBtn) engineBtn.click();
+                            }
+                            setTimeout(() => {
+                                const mg = document.getElementById('model-group');
+                                if (mg) {
+                                    const modelBtn = mg.querySelector(`[data-value="${item.model}"]`);
+                                    if (modelBtn) modelBtn.click();
+                                }
+                            }, 50);
+                        }
+                    } else {
+                        // 如果是旧的单纯字符串 URL，我们只从文件名尝试恢复 Seed
+                        let parts = currentFilename.split('.')[0].split('_');
+                        if (parts.length >= 3) {
+                            const parsedSeed = parseInt(parts[parts.length - 1]);
+                            if (!isNaN(parsedSeed)) {
+                                $seed.value = parsedSeed;
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error('❌ [ImageStudio] 切换历史记录大图时发生异常:', err);
+                }
             });
             $historyGrid.appendChild(img);
         });
@@ -304,7 +410,14 @@
         });
         const data = await resp.json();
         if (data.error) throw new Error(data.error);
-        showImage(data.url);
+        showImage(data.url, {
+            prompt: prompt,
+            negative_prompt: ($negative.value || '').trim(),
+            seed: data.seed,
+            character: character,
+            engine: 'comfyui',
+            model: data.model || model
+        });
         showStatus('success',
             `✅ 生成完成 | seed: ${data.seed} | model: ${data.model}`);
     }
@@ -387,7 +500,14 @@
             });
             const data = await resp.json();
             if (data.error) throw new Error(data.error);
-            showImage(data.url);
+            showImage(data.url, {
+                prompt: document.getElementById('prompt').value.trim(),
+                negative_prompt: document.getElementById('negative').value.trim(),
+                seed: data.seed,
+                character: data.character || character,
+                engine: 'comfyui',
+                model: data.model || refineModel
+            });
             const typeLabel = data.img_type === 'cartoon' ? '🎨卡通' : '📷真人';
             showStatus('success',
                 `✅ 精修完成 | ${typeLabel} | denoise: ${data.denoise} | model: ${data.model}`);
@@ -430,7 +550,14 @@
             });
             const data = await resp.json();
             if (data.error) throw new Error(data.error);
-            showImage(data.url);
+            showImage(data.url, {
+                prompt: document.getElementById('prompt').value.trim(),
+                negative_prompt: document.getElementById('negative').value.trim(),
+                seed: data.seed,
+                character: character,
+                engine: 'comfyui',
+                model: refineModel
+            });
             showStatus('success', `✅ ${info.name}完成 | mode: ${mode} | denoise: ${data.denoise}`);
         } catch(e) {
             showStatus('error', `❌ ${info.name}失败: ${e.message}`);
@@ -454,7 +581,14 @@
             if (!upData.ok) throw new Error(upData.error);
             currentFilename = upData.filename;
             isUploaded = true;
-            showImage(upData.url);
+            showImage(upData.url, {
+                prompt: '',
+                negative_prompt: '',
+                seed: -1,
+                character: '',
+                engine: 'upload',
+                model: ''
+            });
             showStatus('success',
                 '✅ 上传成功，可点击精修按钮进行二次处理');
         } catch(e) {
@@ -465,16 +599,42 @@
     };
 
     // ── 额度查询 ──
+    let fetchSuccess = true;
+
+    function updateQuotaDisplay() {
+        const span = document.getElementById('quota-display');
+        if (!span || currentBalance === null) return;
+        
+        if (!fetchSuccess) {
+            span.innerText = `⚡ Pollinations 剩余额度: 未知 (API Key 权限受限)`;
+            span.style.color = '#ffa940';
+            return;
+        }
+
+        let costPerImage = 0.002; // 统一按照 0.002 pt/张计算
+        if (model === 'flux') {
+            costPerImage = 0.002; 
+        } else if (model === 'zimage') {
+            costPerImage = 0.002;
+        }
+        
+        let images_left = Math.floor(currentBalance / costPerImage);
+        span.innerText = `⚡ Pollinations 剩余额度: ${currentBalance.toFixed(3)} pt (约可生成 ${images_left} 张)`;
+        span.style.color = images_left < 20 ? '#ff4d4f' : '#a0a0a0';
+    }
+
     async function fetchQuota() {
         const span = document.getElementById('quota-display');
         if (!span) return;
         try {
             const r = await fetch('./api/pollinations/quota');
             const d = await r.json();
-            span.innerText = `⚡ Pollinations 剩余额度: ${d.balance.toFixed(3)} pt (约可生成 ${d.images_left} 张)`;
-            span.style.color = d.images_left < 20 ? '#ff4d4f' : '#a0a0a0';
+            currentBalance = d.balance;
+            fetchSuccess = d.fetch_success;
+            updateQuotaDisplay();
         } catch(e) {
             span.innerText = `⚡ Pollinations 剩余额度: 获取失败`;
+            fetchSuccess = false;
         }
     }
     
@@ -484,6 +644,39 @@
     // ── 放大查看逻辑 ──
     const $modal = document.getElementById('image-modal');
     const $modalImg = document.getElementById('modal-img');
+    const $modalPrev = document.getElementById('modal-prev');
+    const $modalNext = document.getElementById('modal-next');
+    const $modalDebug = document.getElementById('modal-debug');
+    let currentModalIndex = -1;
+
+    // 提取纯文件名（安全过滤协议、主机名、相对路径、Query参数及哈希的干扰）
+    function getCleanFilename(url) {
+        if (!url) return '';
+        try {
+            const decoded = decodeURIComponent(url);
+            const pathOnly = decoded.split('?')[0].split('#')[0];
+            return pathOnly.split('/').pop();
+        } catch (e) {
+            return url.split('/').pop() || '';
+        }
+    }
+
+    function updateModalNavButtons() {
+        if ($modalDebug) {
+            $modalDebug.style.display = 'none'; // 调试完成，正式环境隐藏以确保视觉高级感
+        }
+        if (!$modalPrev || !$modalNext) return;
+        if (currentModalIndex === -1 || history.length <= 1) {
+            $modalPrev.style.display = 'none';
+            $modalNext.style.display = 'none';
+        } else {
+            // 历史记录视觉排布：左侧为新 (index小)，右侧为旧 (index大)
+            // 左按钮（Prev）向左走 -> 指向更新的图，即 index 减小，当前 index 必须 > 0 才能点
+            $modalPrev.style.display = currentModalIndex > 0 ? 'block' : 'none';
+            // 右按钮（Next）向右走 -> 指向更旧的图，即 index 增大，当前 index 必须 < history.length - 1 才能点
+            $modalNext.style.display = currentModalIndex < history.length - 1 ? 'block' : 'none';
+        }
+    }
 
     if ($image && $modal && $modalImg) {
         $image.style.cursor = 'zoom-in';
@@ -495,13 +688,77 @@
                 $modalImg.src = $image.src;
                 // 防止页面背景滚动
                 document.body.style.overflow = 'hidden';
+
+                // 查找当前图片在 history 中的索引
+                const currentFilename = getCleanFilename($image.src);
+                currentModalIndex = history.findIndex(item => {
+                    const u = typeof item === 'string' ? item : item.url;
+                    return u && getCleanFilename(u) === currentFilename;
+                });
+                updateModalNavButtons();
             }
         });
 
-        // 点击 Modal 任意区域关闭
-        $modal.addEventListener('click', () => {
+        // 点击 Modal 任意区域关闭（排除导航按钮）
+        $modal.addEventListener('click', (e) => {
+            if (e.target.id === 'modal-prev' || e.target.id === 'modal-next') {
+                return;
+            }
             $modal.style.display = 'none';
             document.body.style.overflow = '';
+        });
+
+        if ($modalPrev) {
+            $modalPrev.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (currentModalIndex > 0) { // 向左切换 (更近/更新生成的图，索引递减)
+                    currentModalIndex--;
+                    const item = history[currentModalIndex];
+                    const url = typeof item === 'string' ? item : item.url;
+                    $modalImg.src = url;
+                    updateModalNavButtons();
+                    // 同步背后的主图
+                    const imgs = $historyGrid.querySelectorAll('img');
+                    if (imgs[currentModalIndex]) imgs[currentModalIndex].click();
+                }
+            });
+        }
+
+        if ($modalNext) {
+            $modalNext.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (currentModalIndex < history.length - 1) { // 向右切换 (更早/更旧生成的图，索引递增)
+                    currentModalIndex++;
+                    const item = history[currentModalIndex];
+                    const url = typeof item === 'string' ? item : item.url;
+                    $modalImg.src = url;
+                    updateModalNavButtons();
+                    // 同步背后的主图
+                    const imgs = $historyGrid.querySelectorAll('img');
+                    if (imgs[currentModalIndex]) imgs[currentModalIndex].click();
+                }
+            });
+        }
+
+        // ── 键盘快捷键支持 (Esc关闭，左右方向键导航) ──
+        document.addEventListener('keydown', (e) => {
+            if ($modal && $modal.style.display === 'block') {
+                if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if ($modalPrev && currentModalIndex > 0) {
+                        $modalPrev.click();
+                    }
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    if ($modalNext && currentModalIndex < history.length - 1) {
+                        $modalNext.click();
+                    }
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    $modal.style.display = 'none';
+                    document.body.style.overflow = '';
+                }
+            }
         });
     }
 

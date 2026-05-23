@@ -4,4 +4,6 @@ outputs/
 .DS_Store
 img_studio.log
 img_studio_nohup.log
+*.log
 venv/
+.env
