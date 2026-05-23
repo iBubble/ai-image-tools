@@ -38,6 +38,11 @@ Located in the `pollinations/` subdirectory, this is a dark-themed dashboard dri
 - **角色特征强制注入 (Forced Character Trait Injection)**：预定义的衣着、体型模板会以 `1.3` 高权重前置压入 prompt，确保长线生产的角色风格统一。<br> Predefined templates for clothing and body types are prepended to the prompt with a high `1.3` weight, ensuring unified character styles across long-term production.
 - **智能卡通/真人判定与修图 (Smart Cartoon/Photoreal Detection & Retouching)**：底层算法侦测原图的饱和度和边缘锐度，根据不同二次元/真人比率切分不同的去噪参数交给 ComfyUI 精修。<br> Underlying algorithms detect original image saturation and edge sharpness, allocating different denoising parameters to ComfyUI based on the anime-to-photoreal ratio.
 - **实时看板与推送 (Real-time Dashboard & Push)**：集成飞书 (Feishu/Lark) Webhook 以极速发布成片。<br> Integrates Feishu Webhook for lightning-fast asset distribution.
+- **高交互性大图浏览器 (Premium Image Modal Viewer)**：
+  - **无缝“上一张/下一张”翻阅**: 大图放大后支持左右按钮流畅翻页，排布逻辑与下方历史记录网格完全同步（左键向左滑指向更新的图，右键向右滑指向更早的图）。
+  - **双向数据自动联动**: 在 Modal 中翻页切换大图时，后台会自动模拟点击对应的历史缩略图，使得关闭大图时，主面板的生图参数（Seed、提示词、人物等）实现 100% 自动对齐和完美回填。
+  - **极致丝滑的键盘快捷键**: 支持键盘 **左方向键 `←`** 切换上一张、**右方向键 `→`** 切换下一张、**Escape `Esc`** 一键退出关闭，并自动屏蔽浏览器方向键滚动干扰，切图如飞。
+  - **鲁棒匹配与零缓存**: 前端采用 `getCleanFilename` 物理机制，彻底过滤所有绝对路径与 Query 缓存干扰，实现历史记录 100% 精准索引定位；后端引入 Flask 全局无缓存拦截，开发刷新即刻生效。
 
 ### 快速启动 Web 面板 | Quick Start for Web Dashboard
 ```bash
